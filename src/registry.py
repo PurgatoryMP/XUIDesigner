@@ -1,5 +1,8 @@
 
 LLVIEW_PARAMS = {
+    # Designer Utilities
+    "designer_export_geometry": {"type": "bool", "default": "true", "group": "Designer Tools"},
+
     # General & Lifecycle
     "name": {"type": "str", "default": "unnamed", "group": "LLView (General)"},
     "enabled": {"type": "bool", "default": "true", "group": "LLView (General)"},
@@ -58,6 +61,7 @@ LLUICTRL_PARAMS = {
     "mouseleave_callback": {"type": "str", "default": "", "group": "LLUICtrl (Callbacks)"},
 }
 
+# BACKWARD COMPATIBILITY ALIAS: Prevents ImportError in inspector.py and graphics_item.py
 UNIVERSAL_ATTRIBUTES = {**LLVIEW_PARAMS, **LLUICTRL_PARAMS}
 
 XUI_REGISTRY = {
@@ -110,7 +114,8 @@ XUI_REGISTRY = {
             "width": 250, "height": 180, "color": "#2a3540", "desc": "Tabbed panel switcher (LLTabContainer)",
             "params": {
                 **LLUICTRL_PARAMS,
-                "tab_position": {"type": "combo", "options": ["top", "bottom", "left"], "default": "top", "group": "LLTabContainer"},
+                "tab_position": {"type": "combo", "options": ["top", "bottom", "left"], "default": "top",
+                                 "group": "LLTabContainer"},
                 "tab_height": {"type": "int", "default": "21", "group": "LLTabContainer"},
                 "tab_min_width": {"type": "int", "default": "60", "group": "LLTabContainer"},
                 "tab_max_width": {"type": "int", "default": "150", "group": "LLTabContainer"},

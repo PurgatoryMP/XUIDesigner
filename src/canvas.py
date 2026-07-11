@@ -107,24 +107,16 @@ class CanvasContainer(QGraphicsView):
         tag_name = event.mimeData().text()
         scene_pos = self.mapToScene(event.pos())
 
-        x = max(20.0, round(scene_pos.x() / 10.0) * 10.0)
-        y = max(20.0, round(scene_pos.y() / 10.0) * 10.0)
-
-        new_item = XUIGraphicsItem(tag_name, {"left": str(int(x)), "top": str(int(y))})
-        new_item.setPos(x, y)
-
+        # Determine what is under the cursor (the parent container, if any)
         parent_item = self.scene.itemAt(scene_pos, self.transform())
 
-        if isinstance(parent_item, XUIGraphicsItem) and parent_item != new_item:
-
+        if isinstance(parent_item, XUIGraphicsItem):
             # --- TAB CONTAINER DROP REDIRECTION ---
-            if parent_item.tag_name == "tab_container" and new_item.tag_name not in ["panel", "layout_panel"]:
+            if parent_item.tag_name == "tab_container" and tag_name not in ["panel", "layout_panel"]:
                 tabs = [c for c in parent_item.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
                 if tabs:
-                    # Redirect drop to the currently active tab panel
                     parent_item = tabs[parent_item.active_tab_index]
                 else:
-                    # If empty, auto-create a first tab panel so the dropped item has somewhere to go
                     tab_height = int(parent_item.attributes.get("tab_height", 21))
                     tab_panel = XUIGraphicsItem("panel", {
                         "name": "tab_1", "label": "Tab 1",
@@ -135,11 +127,29 @@ class CanvasContainer(QGraphicsView):
                     parent_item.add_child_item(tab_panel)
                     parent_item = tab_panel
 
+            # CRITICAL FIX: Convert the absolute scene mouse position to the parent's local coordinate space
+            local_pos = parent_item.mapFromScene(scene_pos)
+
+            # Snap to parent's internal 10x10 grid without drifting
+            local_x = max(0.0, round(local_pos.x() / 10.0) * 10.0)
+            local_y = max(0.0, round(local_pos.y() / 10.0) * 10.0)
+
+            # Create the item directly at the newly mapped local coordinates
+            new_item = XUIGraphicsItem(tag_name, {"left": str(int(local_x)), "top": str(int(local_y))})
+            new_item.setPos(local_x, local_y)
+
+            # Nest it
             parent_item.add_child_item(new_item)
-            rel_pos = new_item.scenePos() - parent_item.scenePos()
-            new_item.setPos(rel_pos)
             new_item.sync_attributes_to_geometry()
+
         else:
+            # Dropping on the main canvas (root container)
+            x = max(20.0, round(scene_pos.x() / 10.0) * 10.0)
+            y = max(20.0, round(scene_pos.y() / 10.0) * 10.0)
+
+            new_item = XUIGraphicsItem(tag_name, {"left": str(int(x)), "top": str(int(y))})
+            new_item.setPos(x, y)
+
             if self.root_container_instance is None:
                 self.root_container_instance = new_item
             self.scene.addItem(new_item)

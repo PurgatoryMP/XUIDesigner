@@ -70,7 +70,7 @@ class PropertyInspector(QWidget):
                     editor.currentTextChanged.connect(lambda text, k=key: self._on_attr_changed(k, text))
                 else:
                     editor = QLineEdit(str(val))
-                    editor.textChanged.connect(lambda text, k=key: self._on_attr_changed(k, text))
+                    editor.editingFinished.connect(lambda k=key, ed=editor: self._on_attr_changed(k, ed.text()))
 
                 grp_layout.addRow(QLabel(key + ":"), editor)
 

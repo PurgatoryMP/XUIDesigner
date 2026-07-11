@@ -44,6 +44,8 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
 
         self.child_xui_items = []
+        self.non_visual_children = []
+        self.inner_text = ""
         self.resize_handle_size = 6
         self.resizing = False
         self.resize_dir = None
