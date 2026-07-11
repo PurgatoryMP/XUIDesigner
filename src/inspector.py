@@ -1,7 +1,7 @@
-# inspector.py
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QFormLayout, QLabel, QGroupBox, QLineEdit, QComboBox
 from registry import UNIVERSAL_ATTRIBUTES, XUI_REGISTRY
+
 
 class PropertyInspector(QWidget):
     property_changed_signal = Signal()

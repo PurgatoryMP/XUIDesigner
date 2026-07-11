@@ -1,6 +1,9 @@
-# tree_widget.py
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator
+from PySide6.QtWidgets import (
+    QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QAbstractItemView
+)
+from graphics_item import XUIGraphicsItem
+
 
 class SceneTreeWidget(QTreeWidget):
     def __init__(self, parent=None):
@@ -9,6 +12,11 @@ class SceneTreeWidget(QTreeWidget):
         self.itemSelectionChanged.connect(self._on_tree_selection)
         self.canvas_container = None
         self.syncing = False
+
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDefaultDropAction(Qt.MoveAction)
 
     def set_canvas(self, canvas):
         self.canvas_container = canvas
@@ -35,6 +43,90 @@ class SceneTreeWidget(QTreeWidget):
 
         for child in xui_item.child_xui_items:
             self._add_node_to_tree(child, tree_item)
+
+    def dragEnterEvent(self, event):
+        super().dragEnterEvent(event)
+        event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        super().dragMoveEvent(event)
+        event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        selected = self.selectedItems()
+        if not selected:
+            return
+
+        dragged_tree_item = selected[0]
+        dragged_xui = dragged_tree_item.data(0, Qt.UserRole)
+
+        target_tree_item = self.itemAt(event.pos())
+        if not target_tree_item or target_tree_item == dragged_tree_item:
+            event.ignore()
+            return
+
+        target_xui = target_tree_item.data(0, Qt.UserRole)
+        if not dragged_xui or not target_xui:
+            event.ignore()
+            return
+
+        if self.canvas_container and self.canvas_container.root_container_instance == dragged_xui:
+            event.ignore()
+            return
+
+        curr = target_xui
+        while curr:
+            if curr == dragged_xui:
+                event.ignore()
+                return
+            curr = curr.parentItem() if isinstance(curr.parentItem(), XUIGraphicsItem) else None
+
+        old_parent = dragged_xui.parentItem()
+        if isinstance(old_parent, XUIGraphicsItem):
+            old_parent.remove_child_item(dragged_xui)
+
+        pos_mode = self.dropIndicatorPosition()
+
+        if pos_mode == QAbstractItemView.OnItem:
+
+            # --- TAB CONTAINER DROP REDIRECTION ---
+            if target_xui.tag_name == "tab_container" and dragged_xui.tag_name not in ["panel", "layout_panel"]:
+                tabs = [c for c in target_xui.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
+                if tabs:
+                    target_xui = tabs[target_xui.active_tab_index]
+
+            target_xui.add_child_item(dragged_xui)
+            new_parent = target_xui
+
+        elif pos_mode in (QAbstractItemView.AboveItem, QAbstractItemView.BelowItem):
+            new_parent = target_xui.parentItem()
+            if not isinstance(new_parent, XUIGraphicsItem):
+                new_parent = target_xui
+                new_parent.add_child_item(dragged_xui)
+            else:
+                idx = new_parent.child_xui_items.index(target_xui) if target_xui in new_parent.child_xui_items else len(
+                    new_parent.child_xui_items)
+                if pos_mode == QAbstractItemView.BelowItem:
+                    idx += 1
+                if hasattr(new_parent, 'insert_child_item'):
+                    new_parent.insert_child_item(idx, dragged_xui)
+                else:
+                    new_parent.add_child_item(dragged_xui)
+        else:
+            event.ignore()
+            return
+
+        if isinstance(new_parent, XUIGraphicsItem):
+            rel_pos = dragged_xui.scenePos() - new_parent.scenePos()
+            dragged_xui.setPos(rel_pos)
+            dragged_xui.sync_attributes_to_geometry()
+
+        if self.canvas_container:
+            self.canvas_container.notify_item_changed(dragged_xui)
+            self.canvas_container.scene.update()
+
+        event.setDropAction(Qt.IgnoreAction)
+        event.accept()
 
     def _on_tree_selection(self):
         if self.syncing or not self.canvas_container:

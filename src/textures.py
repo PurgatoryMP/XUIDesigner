@@ -1,4 +1,3 @@
-# textures.py
 import os
 from PIL import Image
 from PySide6.QtCore import QRect, QRectF
@@ -8,8 +7,11 @@ class TextureManager:
     """Singleton texture loader for PNG, TGA, and J2C files."""
     _instance = None
 
-    def __init__(self, skin_base_path="G:/viewer/indra/newview/skins/default/textures"):
-        self.base_path = skin_base_path
+    # Point this to your copy of /viewer/indra/newview/skins/default/textures
+    xui_skin_textures = "G:/viewer/indra/newview/skins/default/textures"
+
+    def __init__(self):
+        self.base_path = self.xui_skin_textures
         self.cache = {}
         self.texture_map = {
             "floater_bg": "windows/Window_Background.png",
@@ -22,6 +24,12 @@ class TextureManager:
             "line_editor": "widgets/TextField_Off.png",
             "combo_box": "widgets/ComboButton_Off.png",
             "panel_bg": "windows/Inspector_Background.png",
+            "tab_top_left_off": "containers/TabTop_Left_Off.png",
+            "tab_top_left_on": "containers/TabTop_Left_Selected.png",
+            "tab_top_mid_off": "containers/TabTop_Middle_Off.png",
+            "tab_top_mid_on": "containers/TabTop_Middle_Selected.png",
+            "tab_top_right_off": "containers/TabTop_Right_Off.png",
+            "tab_top_right_on": "containers/TabTop_Right_Selected.png",
         }
 
     @classmethod

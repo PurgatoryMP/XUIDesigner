@@ -1,8 +1,3 @@
-# registry.py
-
-# ==============================================================================
-# --- 1. BASE CLASSES (INHERITED BY EVERY WIDGET) ---
-# ==============================================================================
 
 LLVIEW_PARAMS = {
     # General & Lifecycle
@@ -63,12 +58,7 @@ LLUICTRL_PARAMS = {
     "mouseleave_callback": {"type": "str", "default": "", "group": "LLUICtrl (Callbacks)"},
 }
 
-# BACKWARD COMPATIBILITY ALIAS: Prevents ImportError in inspector.py and graphics_item.py
 UNIVERSAL_ATTRIBUTES = {**LLVIEW_PARAMS, **LLUICTRL_PARAMS}
-
-# ==============================================================================
-# --- 2. SPECIALIZED WIDGET PARAMS & REGISTRY ---
-# ==============================================================================
 
 XUI_REGISTRY = {
     "Containers & Windows": {
@@ -120,8 +110,10 @@ XUI_REGISTRY = {
             "width": 250, "height": 180, "color": "#2a3540", "desc": "Tabbed panel switcher (LLTabContainer)",
             "params": {
                 **LLUICTRL_PARAMS,
-                "tab_position": {"type": "combo", "options": ["top", "bottom", "left"], "default": "top",
-                                 "group": "LLTabContainer"},
+                "tab_position": {"type": "combo", "options": ["top", "bottom", "left"], "default": "top", "group": "LLTabContainer"},
+                "tab_height": {"type": "int", "default": "21", "group": "LLTabContainer"},
+                "tab_min_width": {"type": "int", "default": "60", "group": "LLTabContainer"},
+                "tab_max_width": {"type": "int", "default": "150", "group": "LLTabContainer"},
             }
         },
         "accordion": {

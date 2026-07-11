@@ -1,6 +1,6 @@
-# compiler.py
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
+
 
 class XUICompiler:
     @staticmethod

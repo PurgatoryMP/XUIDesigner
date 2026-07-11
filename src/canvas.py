@@ -1,4 +1,3 @@
-# canvas.py
 from PySide6.QtCore import Qt, Signal, QLineF, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
@@ -20,9 +19,6 @@ class CanvasContainer(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor("#141414")))
         self.setRenderHint(QPainter.Antialiasing, False)
         self.setDragMode(QGraphicsView.RubberBandDrag)
-
-        # CRITICAL FIX: FullViewportUpdate completely eliminates cascading window artifacts
-        # and visual drag trails when moving custom 9-sliced objects across grid lines.
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
 
         self.scene.selectionChanged.connect(self._on_selection_changed)
@@ -43,9 +39,6 @@ class CanvasContainer(QGraphicsView):
         painter.drawLines(lines)
 
     def drawForeground(self, painter, rect):
-        """
-        Renders horizontal and vertical measurement rulers clamped to viewport edges.
-        """
         super().drawForeground(painter, rect)
         painter.save()
 
@@ -54,20 +47,17 @@ class CanvasContainer(QGraphicsView):
         text_color = QColor("#CCCCCC")
         painter.setFont(QFont("SansSerif", 7))
 
-        # Map viewport (0,0) to scene coordinates so rulers stay docked to edges
         top_left_scene = self.mapToScene(0, 0)
         top_y = top_left_scene.y()
         left_x = top_left_scene.x()
 
-        # --- HORIZONTAL RULER ---
         painter.fillRect(QRectF(left_x, top_y, rect.width(), 20), ruler_bg)
         painter.setPen(QPen(QColor("#333333"), 1))
         painter.drawLine(QLineF(left_x, top_y + 20, left_x + rect.width(), top_y + 20))
 
         start_x = int(left_x) - (int(left_x) % 10)
         for x in range(start_x, int(left_x + rect.width()), 10):
-            if x < left_x + 20:
-                continue
+            if x < left_x + 20: continue
             if x % 100 == 0:
                 painter.setPen(QPen(tick_color, 1))
                 painter.drawLine(QLineF(x, top_y + 10, x, top_y + 20))
@@ -80,15 +70,13 @@ class CanvasContainer(QGraphicsView):
                 painter.setPen(QPen(QColor("#555555"), 1))
                 painter.drawLine(QLineF(x, top_y + 16, x, top_y + 20))
 
-        # --- VERTICAL RULER ---
         painter.fillRect(QRectF(left_x, top_y, 20, rect.height()), ruler_bg)
         painter.setPen(QPen(QColor("#333333"), 1))
         painter.drawLine(QLineF(left_x + 20, top_y, left_x + 20, top_y + rect.height()))
 
         start_y = int(top_y) - (int(top_y) % 10)
         for y in range(start_y, int(top_y + rect.height()), 10):
-            if y < top_y + 20:
-                continue
+            if y < top_y + 20: continue
             if y % 100 == 0:
                 painter.setPen(QPen(tick_color, 1))
                 painter.drawLine(QLineF(left_x + 10, y, left_x + 20, y))
@@ -101,7 +89,6 @@ class CanvasContainer(QGraphicsView):
                 painter.setPen(QPen(QColor("#555555"), 1))
                 painter.drawLine(QLineF(left_x + 16, y, left_x + 20, y))
 
-        # --- CORNER DOCK BOX ---
         painter.fillRect(QRectF(left_x, top_y, 20, 20), QColor("#181818"))
         painter.setPen(QPen(QColor("#444444"), 1))
         painter.drawRect(QRectF(left_x, top_y, 20, 20))
@@ -120,7 +107,6 @@ class CanvasContainer(QGraphicsView):
         tag_name = event.mimeData().text()
         scene_pos = self.mapToScene(event.pos())
 
-        # Offset slightly so items don't drop under the 20px rulers
         x = max(20.0, round(scene_pos.x() / 10.0) * 10.0)
         y = max(20.0, round(scene_pos.y() / 10.0) * 10.0)
 
@@ -128,9 +114,29 @@ class CanvasContainer(QGraphicsView):
         new_item.setPos(x, y)
 
         parent_item = self.scene.itemAt(scene_pos, self.transform())
+
         if isinstance(parent_item, XUIGraphicsItem) and parent_item != new_item:
+
+            # --- TAB CONTAINER DROP REDIRECTION ---
+            if parent_item.tag_name == "tab_container" and new_item.tag_name not in ["panel", "layout_panel"]:
+                tabs = [c for c in parent_item.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
+                if tabs:
+                    # Redirect drop to the currently active tab panel
+                    parent_item = tabs[parent_item.active_tab_index]
+                else:
+                    # If empty, auto-create a first tab panel so the dropped item has somewhere to go
+                    tab_height = int(parent_item.attributes.get("tab_height", 21))
+                    tab_panel = XUIGraphicsItem("panel", {
+                        "name": "tab_1", "label": "Tab 1",
+                        "left": "0", "top": str(tab_height),
+                        "width": parent_item.attributes.get("width", "250"),
+                        "height": str(max(10, int(parent_item.attributes.get("height", "180")) - tab_height))
+                    })
+                    parent_item.add_child_item(tab_panel)
+                    parent_item = tab_panel
+
             parent_item.add_child_item(new_item)
-            rel_pos = new_item.pos() - parent_item.scenePos()
+            rel_pos = new_item.scenePos() - parent_item.scenePos()
             new_item.setPos(rel_pos)
             new_item.sync_attributes_to_geometry()
         else:

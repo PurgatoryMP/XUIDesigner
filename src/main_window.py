@@ -1,4 +1,3 @@
-# main_window.py
 import xml.etree.ElementTree as ET
 from PySide6.QtCore import Qt, QPointF, QMimeData
 from PySide6.QtGui import QFont, QAction, QDrag
@@ -74,7 +73,7 @@ class MainWindow(QMainWindow):
         main_splitter = QSplitter(Qt.Horizontal, self)
         self.setCentralWidget(main_splitter)
 
-        # 1. LEFT PANE: Widget Controls Palette (Unchanged)
+        # 1. LEFT PANE: Widget Controls Palette
         palette_tree = WidgetPaletteTree()
         for cat_name, widgets in XUI_REGISTRY.items():
             cat_item = QTreeWidgetItem(palette_tree, [cat_name])
@@ -101,7 +100,7 @@ class MainWindow(QMainWindow):
         center_splitter.setSizes([650, 300])
         main_splitter.addWidget(center_splitter)
 
-        # 3. RIGHT PANE: XUI DOM Hierarchy / Context Menu (Top) + Property Attributes (Bottom)
+        # 3. RIGHT PANE: XUI DOM Hierarchy (Top) + Property Attributes (Bottom)
         right_splitter = QSplitter(Qt.Vertical)
 
         tree_container = QWidget()
@@ -124,10 +123,8 @@ class MainWindow(QMainWindow):
         right_splitter.setSizes([350, 600])
         main_splitter.addWidget(right_splitter)
 
-        # Proportions for Left, Center, Right panes
         main_splitter.setSizes([250, 950, 400])
 
-        # Signal Wiring
         self.canvas.item_selected_signal.connect(self.inspector.set_item)
         self.canvas.item_modified_signal.connect(self._refresh_code_view)
         self.inspector.property_changed_signal.connect(self._refresh_code_view)
@@ -168,45 +165,93 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Import Error", f"Failed to parse XUI file:\n{str(e)}")
 
     def _parse_xml_node(self, element, parent_item=None, last_sibling_item=None):
+        """
+        Parses XUI nodes using a robust algebraic solver that accurately handles SL's
+        relative layout stretching (e.g. evaluating both left and right simultaneously).
+        """
         tag_name = element.tag
 
+        # Skip event callbacks and sub-components (like floater.string)
         if "." in tag_name:
             return None
 
         attributes = dict(element.attrib)
-        width = int(attributes.get("width", 100))
-        height = int(attributes.get("height", 20))
 
-        left = 0
-        top = 0
+        # Identify parent bounds to evaluate negative offsets
+        parent_w = parent_item.rect().width() if isinstance(parent_item, XUIGraphicsItem) else 500
+        parent_h = parent_item.rect().height() if isinstance(parent_item, XUIGraphicsItem) else 500
 
+        left = None
+        right = None
+        top = None
+        bottom = None
+
+        # --- HORIZONTAL ANCHOR EVALUATION ---
         if "left" in attributes:
             left = int(attributes["left"])
         elif "left_delta" in attributes and last_sibling_item:
             left = int(last_sibling_item.x()) + int(attributes["left_delta"])
         elif "left_pad" in attributes and last_sibling_item:
             left = int(last_sibling_item.x() + last_sibling_item.rect().width()) + int(attributes["left_pad"])
-        elif "right" in attributes and parent_item:
-            parent_w = parent_item.rect().width() if hasattr(parent_item, 'rect') else 500
-            left = parent_w + int(attributes["right"]) - width
 
+        if "right" in attributes:
+            right_val = int(attributes["right"])
+            if right_val <= 0:
+                right = int(parent_w) + right_val
+            else:
+                right = right_val
+
+        # --- VERTICAL ANCHOR EVALUATION ---
         if "top" in attributes:
             top = int(attributes["top"])
         elif "top_delta" in attributes and last_sibling_item:
             top = int(last_sibling_item.y()) + int(attributes["top_delta"])
         elif "top_pad" in attributes and last_sibling_item:
             top = int(last_sibling_item.y() + last_sibling_item.rect().height()) + int(attributes["top_pad"])
-        elif "bottom" in attributes and parent_item:
-            parent_h = parent_item.rect().height() if hasattr(parent_item, 'rect') else 500
-            top = parent_h + int(attributes["bottom"]) - height
 
-        attributes["left"] = str(left)
-        attributes["top"] = str(top)
-        attributes["width"] = str(width)
-        attributes["height"] = str(height)
+        if "bottom" in attributes:
+            bottom_val = int(attributes["bottom"])
+            if bottom_val <= 0:
+                bottom = int(parent_h) + bottom_val
+            else:
+                bottom = bottom_val
+
+        # --- EXTRACT OR DEDUCE DEFAULT WIDTH & HEIGHT ---
+        default_w = 100
+        default_h = 20
+        for cat, widgets in XUI_REGISTRY.items():
+            if tag_name in widgets:
+                default_w = widgets[tag_name].get("width", 100)
+                default_h = widgets[tag_name].get("height", 20)
+                break
+
+        width = int(attributes.get("width", default_w))
+        height = int(attributes.get("height", default_h))
+
+        # --- RECONCILE CONFLICTS (e.g. left + right determines width automatically) ---
+        if left is not None and right is not None:
+            width = right - left
+        elif left is None and right is not None:
+            left = right - width
+        elif left is None:
+            left = 0
+
+        if top is not None and bottom is not None:
+            height = bottom - top
+        elif top is None and bottom is not None:
+            top = bottom - height
+        elif top is None:
+            top = 0
+
+        # Inject newly calculated definitive geometries so the graphics item respects them perfectly
+        attributes["left"] = str(int(left))
+        attributes["top"] = str(int(top))
+        attributes["width"] = str(int(width))
+        attributes["height"] = str(int(height))
 
         item = XUIGraphicsItem(tag_name, attributes)
         item.setPos(QPointF(left, top))
+        item.sync_geometry_to_attributes()
 
         if parent_item and isinstance(parent_item, XUIGraphicsItem):
             parent_item.add_child_item(item)
