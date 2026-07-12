@@ -1,4 +1,3 @@
-# syntax_highlighter.py
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from PySide6.QtCore import QRegularExpression
 from config import CONFIG

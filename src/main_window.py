@@ -404,12 +404,15 @@ class MainWindow(QMainWindow):
 
         left = right = top = bottom = None
 
+        # -- CRITICAL FIX: Safe Relative Parsing without Siblings --
         if "left" in attributes:
             left = int(attributes["left"])
-        elif "left_delta" in attributes and last_sibling_item:
-            left = int(last_sibling_item.x()) + int(attributes["left_delta"])
-        elif "left_pad" in attributes and last_sibling_item:
-            left = int(last_sibling_item.x() + last_sibling_item.rect().width()) + int(attributes["left_pad"])
+        elif "left_delta" in attributes:
+            left = int(last_sibling_item.x()) + int(attributes["left_delta"]) if last_sibling_item else int(
+                attributes["left_delta"])
+        elif "left_pad" in attributes:
+            left = int(last_sibling_item.x() + last_sibling_item.rect().width()) + int(
+                attributes["left_pad"]) if last_sibling_item else int(attributes["left_pad"])
 
         if "right" in attributes:
             r_val = int(attributes["right"])
@@ -417,10 +420,12 @@ class MainWindow(QMainWindow):
 
         if "top" in attributes:
             top = int(attributes["top"])
-        elif "top_delta" in attributes and last_sibling_item:
-            top = int(last_sibling_item.y()) + int(attributes["top_delta"])
-        elif "top_pad" in attributes and last_sibling_item:
-            top = int(last_sibling_item.y() + last_sibling_item.rect().height()) + int(attributes["top_pad"])
+        elif "top_delta" in attributes:
+            top = int(last_sibling_item.y()) + int(attributes["top_delta"]) if last_sibling_item else int(
+                attributes["top_delta"])
+        elif "top_pad" in attributes:
+            top = int(last_sibling_item.y() + last_sibling_item.rect().height()) + int(
+                attributes["top_pad"]) if last_sibling_item else int(attributes["top_pad"])
 
         if "bottom" in attributes:
             b_val = int(attributes["bottom"])

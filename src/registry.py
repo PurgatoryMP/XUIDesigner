@@ -1,4 +1,3 @@
-# registry.py
 import os
 import xml.etree.ElementTree as ET
 import re

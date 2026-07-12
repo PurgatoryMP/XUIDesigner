@@ -1,4 +1,3 @@
-# graphics_item.py
 from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QCursor, QFont
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem
@@ -67,7 +66,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.attributes["width"] = str(int(rect.width()))
         self.attributes["height"] = str(int(rect.height()))
 
-        # Determine if we should update absolute or relative coordinates
         if "left_delta" not in self.attributes and "left_pad" not in self.attributes:
             self.attributes["left"] = str(int(pos.x()))
         if "top_delta" not in self.attributes and "top_pad" not in self.attributes:
@@ -85,41 +83,46 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.setRect(0, 0, new_w, new_h)
         self.sync_attributes_to_geometry()
 
-        for child in self.child_xui_items:
-            follows_str = child.attributes.get("follows", "left|top").lower()
-            if follows_str == "all":
-                follows = ["left", "top", "right", "bottom"]
-            else:
-                follows = follows_str.split("|")
+        # DELEGATE TO SMART CONTAINERS FIRST
+        if self.tag_name == "tab_container":
+            self.update_tabs()
+        elif self.tag_name == "layout_stack":
+            self.update_layout_stack()
+        else:
+            # Normal 'follows' cascade for raw items
+            for child in self.child_xui_items:
+                follows_str = child.attributes.get("follows", "left|top").lower()
+                if follows_str == "all":
+                    follows = ["left", "top", "right", "bottom"]
+                else:
+                    follows = follows_str.split("|")
 
-            cx, cy = child.x(), child.y()
-            cw, ch = child.rect().width(), child.rect().height()
-            child_dw = child_dh = move_x = move_y = 0
+                cx, cy = child.x(), child.y()
+                cw, ch = child.rect().width(), child.rect().height()
+                child_dw = child_dh = move_x = move_y = 0
 
-            if "left" in follows and "right" in follows:
-                child_dw = dw
-            elif "right" in follows and "left" not in follows:
-                move_x = dw
+                if "left" in follows and "right" in follows:
+                    child_dw = dw
+                elif "right" in follows and "left" not in follows:
+                    move_x = dw
 
-            if "top" in follows and "bottom" in follows:
-                child_dh = dh
-            elif "bottom" in follows and "top" not in follows:
-                move_y = dh
+                if "top" in follows and "bottom" in follows:
+                    child_dh = dh
+                elif "bottom" in follows and "top" not in follows:
+                    move_y = dh
 
-            if move_x != 0 or move_y != 0:
-                child.setPos(cx + move_x, cy + move_y)
-                child.sync_attributes_to_geometry()
+                if move_x != 0 or move_y != 0:
+                    child.setPos(cx + move_x, cy + move_y)
+                    child.sync_attributes_to_geometry()
 
-            if child_dw != 0 or child_dh != 0:
-                child.resize_item(cw + child_dw, ch + child_dh)
+                if child_dw != 0 or child_dh != 0:
+                    child.resize_item(cw + child_dw, ch + child_dh)
 
     # ------------------------------------------------------------------------
-    # RESTORED CHILD & TAB ROUTING METHODS
+    # SMART CONTAINER MANAGERS
     # ------------------------------------------------------------------------
     def update_tabs(self):
-        """Forces tab panels to fit the container and hides inactive tabs."""
-        if self.tag_name != "tab_container":
-            return
+        if self.tag_name != "tab_container": return
 
         tabs = [c for c in self.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
         if self.active_tab_index >= len(tabs):
@@ -127,27 +130,60 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
         tab_height = int(self.attributes.get("tab_height", 21))
         container_w = self.attributes.get("width", "250")
-        container_h = str(max(10, int(self.attributes.get("height", "180")) - tab_height))
+        container_h = str(max(10, int(self.attributes.get("height", "180")) - tab_height - 2))
 
         for i, tab in enumerate(tabs):
             is_active = (i == self.active_tab_index)
             tab.setVisible(is_active)
-
-            tab.setPos(0, tab_height)
-            tab.attributes["left"] = "0"
-            tab.attributes["top"] = str(tab_height)
-
+            tab.setPos(2, tab_height + 2)
+            tab.attributes["left"] = "2"
+            tab.attributes["top"] = str(tab_height + 2)
             try:
-                tab.resize_item(float(container_w), float(container_h))
+                tab.resize_item(float(container_w) - 4, float(container_h))
             except ValueError:
                 pass
 
+    def update_layout_stack(self):
+        """Forces layout panels to arrange linearly inside a layout stack, respecting XUI padding/borders."""
+        if self.tag_name != "layout_stack": return
+
+        orientation = self.attributes.get("orientation", "vertical")
+        panels = [c for c in self.child_xui_items if c.tag_name in ["layout_panel", "panel"]]
+
+        padding = int(self.attributes.get("padding", 0))
+        border_size = int(self.attributes.get("border_size", 0))
+
+        current_x = border_size
+        current_y = border_size
+        stack_w = max(10, self.rect().width() - (border_size * 2))
+        stack_h = max(10, self.rect().height() - (border_size * 2))
+
+        for panel in panels:
+            panel.setPos(current_x, current_y)
+            panel.attributes["left"] = str(int(current_x))
+            panel.attributes["top"] = str(int(current_y))
+
+            panel_w = panel.rect().width()
+            panel_h = panel.rect().height()
+
+            if orientation == "vertical":
+                panel.resize_item(stack_w, panel_h)
+                current_y += panel.rect().height() + padding
+            else:
+                panel.resize_item(panel_w, stack_h)
+                current_x += panel.rect().width() + padding
+
+    # ------------------------------------------------------------------------
+    # RESTORED CHILD LOGIC
+    # ------------------------------------------------------------------------
     def add_child_item(self, child_item):
         if child_item not in self.child_xui_items:
             self.child_xui_items.append(child_item)
             child_item.setParentItem(self)
         if self.tag_name == "tab_container":
             self.update_tabs()
+        elif self.tag_name == "layout_stack":
+            self.update_layout_stack()
 
     def insert_child_item(self, index, child_item):
         if child_item in self.child_xui_items:
@@ -157,6 +193,8 @@ class XUIGraphicsItem(QGraphicsRectItem):
         child_item.setParentItem(self)
         if self.tag_name == "tab_container":
             self.update_tabs()
+        elif self.tag_name == "layout_stack":
+            self.update_layout_stack()
 
     def remove_child_item(self, child_item):
         if child_item in self.child_xui_items:
@@ -164,22 +202,16 @@ class XUIGraphicsItem(QGraphicsRectItem):
             child_item.setParentItem(None)
         if self.tag_name == "tab_container":
             self.update_tabs()
+        elif self.tag_name == "layout_stack":
+            self.update_layout_stack()
 
-    # ------------------------------------------------------------------------
-    # RESTORED BOUNDING & DELETE LOGIC
-    # ------------------------------------------------------------------------
     def _get_delete_rect(self):
-        rect = self.rect()
-        return QRectF(rect.width() - 10, -10, 18, 18)
+        return QRectF(self.rect().width() - 10, -10, 18, 18)
 
     def boundingRect(self):
         return self.rect().adjusted(-12, -12, 12, 12)
 
-    # ------------------------------------------------------------------------
-    # 8-WAY OMNIDIRECTIONAL RESIZE LOGIC
-    # ------------------------------------------------------------------------
     def _get_handles(self):
-        """Returns the 8 10px interaction handles for omnidirectional resizing"""
         r = self.rect()
         w, h, hs = r.width(), r.height(), self.resize_handle_size
         return {
@@ -215,7 +247,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
         if event.button() == Qt.LeftButton:
             pos = event.pos()
 
-            # Interactive Tab Switching
             if self.tag_name == "tab_container":
                 tab_height = int(self.attributes.get("tab_height", 21))
                 if pos.y() <= tab_height:
@@ -293,7 +324,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
             new_x, new_y = cur_pos.x(), cur_pos.y()
             new_w, new_h = cur_rect.width(), cur_rect.height()
 
-            # 8-Way scaling algebra
             if "L" in self.resize_dir:
                 diff = snapped_x - cur_pos.x()
                 new_w = max(10, cur_rect.width() - diff)
@@ -326,6 +356,8 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
             if self.tag_name == "tab_container":
                 self.update_tabs()
+            elif self.tag_name == "layout_stack":
+                self.update_layout_stack()
 
             if hasattr(self.scene(), 'canvas_container'):
                 self.scene().canvas_container.notify_item_changed(self)
@@ -337,7 +369,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
             snapped_x = round(new_pos.x() / 10.0) * 10.0
             snapped_y = round(new_pos.y() / 10.0) * 10.0
 
-            # -- RELATIVE LAYOUT PRESERVATION LOGIC --
             parent = self.parentItem()
             idx = parent.child_xui_items.index(self) if isinstance(parent,
                                                                    XUIGraphicsItem) and self in parent.child_xui_items else -1
@@ -363,7 +394,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
         return super().itemChange(change, value)
 
     def validate(self):
-        """Analyzes the node for syntax errors (red) and structural bad practices (orange)."""
         errors, warnings = [], []
         if self.tag_name not in ["panel", "layout_panel", "text", "view_border", "icon", "window_shade", "accordion",
                                  "scroll_list"]:
@@ -501,15 +531,16 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 painter.drawText(t_rect, Qt.AlignCenter, tab_label)
                 tab_x += calc_width
 
-        elif self.tag_name in ["panel", "layout_panel", "accordion"]:
+        elif self.tag_name in ["panel", "layout_panel", "accordion", "layout_stack"]:
             bg_attr = self.attributes.get("bg_color", "panel_bg")
             panel_pix = tm.get_pixmap(bg_attr)
-            if panel_pix:
+            if panel_pix and self.tag_name != "layout_stack":
                 draw_9_slice(painter, panel_pix, rect, 4, 4, 4, 4)
             else:
                 painter.fillRect(rect, QColor("#2d2d2d" if self.tag_name == "panel" else "#252525"))
-                painter.setPen(QPen(QColor("#3d3d3d"), 1))
-                painter.drawRect(rect)
+                if self.tag_name != "layout_stack":
+                    painter.setPen(QPen(QColor("#3d3d3d"), 1))
+                    painter.drawRect(rect)
 
             is_tab_body = isinstance(self.parentItem(),
                                      XUIGraphicsItem) and self.parentItem().tag_name == "tab_container"

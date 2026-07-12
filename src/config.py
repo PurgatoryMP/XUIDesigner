@@ -1,4 +1,3 @@
-# config.py
 import json, os
 
 CONFIG_FILE = "config.json"
@@ -20,7 +19,7 @@ DEFAULT_CONFIG = {
         "window_text": "#d4d4d4",
         "canvas_bg": "#141414",
         "tree_bg": "#1e1e1e",
-        "highlight": "#1e457c"  # <--- CRITICAL FIX: Added missing highlight key
+        "highlight": "#1e457c"
     }
 }
 
