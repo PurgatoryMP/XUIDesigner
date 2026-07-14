@@ -31,6 +31,15 @@ class XUIGraphicsItem(QGraphicsRectItem):
         if not target_params:
             target_params = LLUICTRL_PARAMS if tag_name != "view" else LLVIEW_PARAMS
 
+        # --- FIX: Ensure newly dragged widgets get a meaningful default name instead of 'unnamed' ---
+        if "name" not in self.attributes:
+            if tag_name in ["floater", "multi_floater", "panel", "layout_panel", "tab_container", "layout_stack"]:
+                self.attributes["name"] = tag_name
+            elif "label" in self.attributes and self.attributes["label"]:
+                self.attributes["name"] = self.attributes["label"].lower().replace(" ", "_")
+            else:
+                self.attributes["name"] = tag_name
+
         for attr, meta in target_params.items():
             if attr not in self.attributes and meta.get("default", "") != "":
                 self.attributes[attr] = meta["default"]
@@ -55,7 +64,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
     def update_z_orders(self):
         """Ensures Qt Canvas Z-ordering strictly mirrors the DOM hierarchy array index."""
         for idx, child in enumerate(self.child_xui_items):
-            # Assigning ascending Z-values guarantees items lower in the hierarchy list draw over earlier siblings
             child.setZValue(float(idx + 1))
             child.update_z_orders()
 
@@ -77,7 +85,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
         parent_w = parent.rect().width() if isinstance(parent, XUIGraphicsItem) else 500
         parent_h = parent.rect().height() if isinstance(parent, XUIGraphicsItem) else 500
 
-        # Maintain integrity of explicit relative 'right' layouts instead of dumping conflicting 'left' tokens
         if "right" in self.attributes:
             try:
                 if int(self.attributes["right"]) <= 0:
@@ -89,7 +96,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
         elif "left_delta" not in self.attributes and "left_pad" not in self.attributes:
             self.attributes["left"] = str(int(pos.x()))
 
-        # Maintain integrity of explicit relative 'bottom' layouts instead of dumping conflicting 'top' tokens
         if "bottom" in self.attributes:
             try:
                 if int(self.attributes["bottom"]) <= 0:
@@ -121,7 +127,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
             for child in self.child_xui_items:
                 follows_str = child.attributes.get("follows", "left|top").lower()
 
-                # Normalize spaces, commas, and pipes for resilient validation token parsing
                 normalized_follows = follows_str.replace(" ", "|").replace(",", "|")
                 follows = [f.strip() for f in normalized_follows.split("|") if f.strip()]
 
@@ -132,13 +137,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 cw, ch = child.rect().width(), child.rect().height()
                 child_dw = child_dh = move_x = move_y = 0
 
-                # Validate horizontal layout scaling matrices
                 if "left" in follows and "right" in follows:
                     child_dw = dw
                 elif "right" in follows and "left" not in follows:
                     move_x = dw
 
-                # Validate vertical layout scaling matrices
                 if "top" in follows and "bottom" in follows:
                     child_dh = dh
                 elif "bottom" in follows and "top" not in follows:
@@ -426,7 +429,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
                                                                    XUIGraphicsItem) and self in parent.child_xui_items else -1
             prev_sib = parent.child_xui_items[idx - 1] if idx > 0 else None
 
-            # Calculate and update 'right' safely if it exists, preserving layout intent
             if "right" in self.attributes:
                 parent_w = parent.rect().width() if isinstance(parent, XUIGraphicsItem) else 500
                 try:
@@ -443,7 +445,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
             else:
                 self.attributes["left"] = str(int(snapped_x))
 
-            # Calculate and update 'bottom' safely if it exists, preserving layout intent
             if "bottom" in self.attributes:
                 parent_h = parent.rect().height() if isinstance(parent, XUIGraphicsItem) else 500
                 try:
@@ -469,8 +470,8 @@ class XUIGraphicsItem(QGraphicsRectItem):
         errors, warnings = [], []
         if self.tag_name not in ["panel", "layout_panel", "text", "view_border", "icon", "window_shade", "accordion",
                                  "scroll_list"]:
-            if not self.attributes.get("name"):
-                warnings.append(f"Bad Practice: Missing 'name' attribute for {self.tag_name}.")
+            if not self.attributes.get("name") or self.attributes.get("name") == "unnamed":
+                warnings.append(f"Bad Practice: Missing or 'unnamed' name attribute for {self.tag_name}.")
 
         if self.tag_name == "layout_panel":
             parent = self.parentItem()
@@ -509,7 +510,9 @@ class XUIGraphicsItem(QGraphicsRectItem):
             else:
                 painter.fillRect(header_rect, QColor("#005588"))
             painter.setPen(QPen(QColor("#FFFFFF")))
-            title = self.attributes.get("title") or self.attributes.get("name", "FLOATER")
+            title = self.attributes.get("title") or self.attributes.get("label") or self.attributes.get("name",
+                                                                                                        "FLOATER")
+            if title == "unnamed": title = "FLOATER"
             painter.drawText(header_rect.adjusted(8, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, title)
 
         elif self.tag_name in ["button", "flyout_button", "split_button"]:
@@ -522,8 +525,9 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 painter.setPen(QPen(QColor("#2b333b"), 1))
                 painter.drawRect(rect)
             painter.setPen(QPen(QColor("#FFFFFF")))
-            painter.drawText(rect, Qt.AlignCenter,
-                             self.attributes.get("label", "Button") or self.attributes.get("name", "Button"))
+            btn_text = self.attributes.get("label") or self.attributes.get("name", "Button")
+            if btn_text == "unnamed": btn_text = "Button"
+            painter.drawText(rect, Qt.AlignCenter, btn_text)
 
         elif self.tag_name in ["line_editor", "search_editor", "spinner", "combo_box"]:
             default_tex = "TextField_Off" if self.tag_name != "combo_box" else "ComboButton_Off"
@@ -554,8 +558,10 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 painter.setPen(QPen(QColor("#888888"), 1))
                 painter.drawRect(chk_rect)
             painter.setPen(QPen(QColor("#FFFFFF")))
+            chk_label = self.attributes.get("label", "Check Box")
+            if chk_label == "unnamed": chk_label = "Check Box"
             painter.drawText(QRectF(rect.x() + 20, rect.y(), rect.width() - 20, rect.height()),
-                             Qt.AlignLeft | Qt.AlignVCenter, self.attributes.get("label", "Check Box"))
+                             Qt.AlignLeft | Qt.AlignVCenter, chk_label)
 
         elif self.tag_name == "tab_container":
             panel_pix = tm.get_pixmap("panel_bg")
@@ -588,6 +594,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
                     tab_label = tab_panel.attributes.get("label", tab_panel.attributes.get("title",
                                                                                            tab_panel.attributes.get(
                                                                                                "name", "Unnamed Tab")))
+                    if tab_label == "unnamed": tab_label = f"Tab {i + 1}"
                     is_active = (i == self.active_tab_index)
 
                     if is_active:
@@ -649,8 +656,10 @@ class XUIGraphicsItem(QGraphicsRectItem):
         else:
             if self.tag_name == "text":
                 painter.setPen(QPen(QColor("#FFFFFF")))
-                painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter,
-                                 self.attributes.get("label", "Text Label") or self.inner_text)
+                txt_label = self.attributes.get("label") or self.attributes.get(
+                    "name") or self.inner_text or "Text Label"
+                if txt_label == "unnamed": txt_label = "Text Label"
+                painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, txt_label)
             else:
                 painter.fillRect(rect, QColor("#3a3a3a"))
                 painter.setPen(QPen(QColor("#555555"), 1))

@@ -49,11 +49,20 @@ class SceneTreeWidget(QTreeWidget):
             return
 
         def build_tree_node(xui_item, parent_widget):
-            label = xui_item.attributes.get("name") or xui_item.attributes.get("label") or f"<{xui_item.tag_name}>"
+            # --- FIX: Avoid printing 'unnamed' if the widget has a valid label or tag name ---
+            name_val = xui_item.attributes.get("name", "")
+            label_val = xui_item.attributes.get("label", "")
+
+            if name_val and name_val != "unnamed":
+                label = name_val
+            elif label_val:
+                label = label_val
+            else:
+                label = f"<{xui_item.tag_name}>"
+
             item = QTreeWidgetItem(parent_widget, [label])
             item.setData(0, Qt.UserRole, xui_item)
 
-            # --- RESTORED GREEN HIGHLIGHT FOR EXTERNAL/IMPORTED XML FILES ---
             if getattr(xui_item, 'is_imported_root', False) or "filename" in xui_item.attributes:
                 item.setForeground(0, QBrush(QColor("#00FF00")))
 
