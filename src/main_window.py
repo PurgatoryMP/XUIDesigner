@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _post_import_layout_pass(self, item):
-        """Recursively recalculates layout containers after full DOM ingestion."""
+        """Recursively recalculates layout containers and Z-ordering after full DOM ingestion."""
         if not item:
             return
 
@@ -445,6 +445,9 @@ class MainWindow(QMainWindow):
             item.update_tabs()
         elif item.tag_name in ("layout_stack", "layout_panel"):
             item.update_layout_stack()
+
+        # Enforce strict DOM list Z-indexing on the completed tree hierarchy
+        item.update_z_orders()
 
     def _open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open XUI XML File", "", "XML Files (*.xml);;All Files (*)")

@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QAbstractItemView
 )
@@ -32,111 +33,96 @@ class SceneTreeWidget(QTreeWidget):
         canvas.item_modified_signal.connect(self.refresh_tree)
 
     def refresh_tree(self, _ignored=None):
-        # Trigger the timer instead of instantly rebuilding
         self.refresh_timer.start()
 
     def _do_refresh_tree(self):
         if self.syncing or not self.canvas_container:
             return
         self.syncing = True
+        selected_xui = self.canvas_container.scene.selectedItems()[
+            0] if self.canvas_container.scene.selectedItems() else None
+
         self.clear()
+        if not self.canvas_container.root_container_instance:
+            self.syncing = False
+            self.tree_refreshed.emit()
+            return
 
-        if self.canvas_container.root_container_instance:
-            self._add_node_to_tree(self.canvas_container.root_container_instance, self.invisibleRootItem())
-            self.expandAll()
+        def build_tree_node(xui_item, parent_widget):
+            label = xui_item.attributes.get("name") or xui_item.attributes.get("label") or f"<{xui_item.tag_name}>"
+            item = QTreeWidgetItem(parent_widget, [label])
+            item.setData(0, Qt.UserRole, xui_item)
 
+            # --- RESTORED GREEN HIGHLIGHT FOR EXTERNAL/IMPORTED XML FILES ---
+            if getattr(xui_item, 'is_imported_root', False) or "filename" in xui_item.attributes:
+                item.setForeground(0, QBrush(QColor("#00FF00")))
+
+            if xui_item == selected_xui:
+                item.setSelected(True)
+
+            for child in xui_item.child_xui_items:
+                build_tree_node(child, item)
+            return item
+
+        root_tree_item = build_tree_node(self.canvas_container.root_container_instance, self)
+        root_tree_item.setExpanded(True)
+        self.expandAll()
         self.syncing = False
         self.tree_refreshed.emit()
 
-    def _add_node_to_tree(self, xui_item, parent_tree_item):
-        name_str = xui_item.attributes.get("name", xui_item.tag_name)
-        display_text = f"<{xui_item.tag_name}> {name_str}"
+    def _sync_dom_to_canvas_hierarchy(self):
+        """Rebuilds XUIGraphicsItem parent-child array ordering and Z-values to match visual QTreeWidget order."""
+        if not self.canvas_container or not self.canvas_container.root_container_instance:
+            return
 
-        if xui_item.is_imported_root:
-            display_text += f" - ({xui_item.source_file})"
+        def sync_item_children(tree_item):
+            xui_item = tree_item.data(0, Qt.UserRole)
+            if not xui_item or not isinstance(xui_item, XUIGraphicsItem):
+                return
 
-        tree_item = QTreeWidgetItem(parent_tree_item, [display_text])
-        tree_item.setData(0, Qt.UserRole, xui_item)
+            new_children = []
+            for i in range(tree_item.childCount()):
+                child_tree_item = tree_item.child(i)
+                child_xui = child_tree_item.data(0, Qt.UserRole)
+                if child_xui and isinstance(child_xui, XUIGraphicsItem):
+                    new_children.append(child_xui)
+                    if child_xui.parentItem() != xui_item:
+                        child_xui.setParentItem(xui_item)
+                    sync_item_children(child_tree_item)
 
-        if xui_item.is_imported_root:
-            from PySide6.QtGui import QColor, QBrush
-            tree_item.setForeground(0, QBrush(QColor("#00FF00")))
+            xui_item.child_xui_items = new_children
+            xui_item.update_z_orders()
 
-        for child in xui_item.child_xui_items:
-            self._add_node_to_tree(child, tree_item)
-
-    def dragEnterEvent(self, event):
-        super().dragEnterEvent(event)
-        event.acceptProposedAction()
-
-    def dragMoveEvent(self, event):
-        super().dragMoveEvent(event)
-        event.acceptProposedAction()
+        root_tree_item = self.topLevelItem(0)
+        if root_tree_item:
+            sync_item_children(root_tree_item)
 
     def dropEvent(self, event):
-        selected = self.selectedItems()
-        if not selected:
+        dragged_item = self.currentItem()
+        if not dragged_item:
+            super().dropEvent(event)
             return
 
-        dragged_tree_item = selected[0]
-        dragged_xui = dragged_tree_item.data(0, Qt.UserRole)
-
-        target_tree_item = self.itemAt(event.pos())
-        if not target_tree_item or target_tree_item == dragged_tree_item:
-            event.ignore()
+        dragged_xui = dragged_item.data(0, Qt.UserRole)
+        target_item = self.itemAt(event.pos())
+        if not target_item or not dragged_xui:
+            super().dropEvent(event)
             return
 
-        target_xui = target_tree_item.data(0, Qt.UserRole)
-        if not dragged_xui or not target_xui:
-            event.ignore()
-            return
+        target_xui = target_item.data(0, Qt.UserRole)
+        drop_pos = self.dropIndicatorPosition()
 
-        if self.canvas_container and self.canvas_container.root_container_instance == dragged_xui:
-            event.ignore()
-            return
-
-        curr = target_xui
-        while curr:
-            if curr == dragged_xui:
-                event.ignore()
-                return
-            curr = curr.parentItem() if isinstance(curr.parentItem(), XUIGraphicsItem) else None
-
-        old_parent = dragged_xui.parentItem()
-        if isinstance(old_parent, XUIGraphicsItem):
-            old_parent.remove_child_item(dragged_xui)
-
-        pos_mode = self.dropIndicatorPosition()
-
-        if pos_mode == QAbstractItemView.OnItem:
-            if target_xui.tag_name == "tab_container" and dragged_xui.tag_name not in ["panel", "layout_panel"]:
-                tabs = [c for c in target_xui.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
-                if tabs:
-                    target_xui = tabs[target_xui.active_tab_index]
-
-            target_xui.add_child_item(dragged_xui)
-            new_parent = target_xui
-
-        elif pos_mode in (QAbstractItemView.AboveItem, QAbstractItemView.BelowItem):
-            new_parent = target_xui.parentItem()
-            if not isinstance(new_parent, XUIGraphicsItem):
-                new_parent = target_xui
-                new_parent.add_child_item(dragged_xui)
-            else:
-                idx = new_parent.child_xui_items.index(target_xui) if target_xui in new_parent.child_xui_items else len(
-                    new_parent.child_xui_items)
-                if pos_mode == QAbstractItemView.BelowItem:
-                    idx += 1
-                if hasattr(new_parent, 'insert_child_item'):
-                    new_parent.insert_child_item(idx, dragged_xui)
-                else:
-                    new_parent.add_child_item(dragged_xui)
+        if drop_pos == QAbstractItemView.OnItem:
+            new_parent_xui = target_xui
         else:
-            event.ignore()
-            return
+            new_parent_xui = target_xui.parentItem() if isinstance(target_xui,
+                                                                   XUIGraphicsItem) and target_xui.parentItem() else self.canvas_container.root_container_instance
 
-        if isinstance(new_parent, XUIGraphicsItem):
-            rel_pos = dragged_xui.scenePos() - new_parent.scenePos()
+        super().dropEvent(event)
+        self._sync_dom_to_canvas_hierarchy()
+
+        if isinstance(new_parent_xui, XUIGraphicsItem):
+            rel_pos = dragged_xui.scenePos() - new_parent_xui.scenePos()
             dragged_xui.setPos(rel_pos)
             dragged_xui.sync_attributes_to_geometry()
 

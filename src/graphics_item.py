@@ -52,6 +52,13 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
         self.sync_geometry_to_attributes()
 
+    def update_z_orders(self):
+        """Ensures Qt Canvas Z-ordering strictly mirrors the DOM hierarchy array index."""
+        for idx, child in enumerate(self.child_xui_items):
+            # Assigning ascending Z-values guarantees items lower in the hierarchy list draw over earlier siblings
+            child.setZValue(float(idx + 1))
+            child.update_z_orders()
+
     def sync_geometry_to_attributes(self):
         try:
             w = float(self.attributes.get("width", 100))
@@ -168,6 +175,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 tab.resize_item(float(container_w) - 4, float(container_h))
             except ValueError:
                 pass
+        self.update_z_orders()
 
     def update_layout_stack(self):
         if self.tag_name != "layout_stack": return
@@ -197,6 +205,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
             else:
                 panel.resize_item(panel_w, stack_h)
                 current_x += panel.rect().width() + padding
+        self.update_z_orders()
 
     def add_child_item(self, child_item):
         if child_item not in self.child_xui_items:
@@ -206,6 +215,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
             self.update_tabs()
         elif self.tag_name == "layout_stack":
             self.update_layout_stack()
+        self.update_z_orders()
 
     def insert_child_item(self, index, child_item):
         if child_item in self.child_xui_items:
@@ -217,6 +227,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
             self.update_tabs()
         elif self.tag_name == "layout_stack":
             self.update_layout_stack()
+        self.update_z_orders()
 
     def remove_child_item(self, child_item):
         if child_item in self.child_xui_items:
@@ -226,6 +237,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
             self.update_tabs()
         elif self.tag_name == "layout_stack":
             self.update_layout_stack()
+        self.update_z_orders()
 
     def _get_delete_rect(self):
         return QRectF(self.rect().width() - 10, -10, 18, 18)
