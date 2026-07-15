@@ -115,8 +115,10 @@ class CanvasContainer(QGraphicsView):
             if parent_item.tag_name == "tab_container" and tag_name not in ["panel", "layout_panel"]:
                 tabs = [c for c in parent_item.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
                 if tabs:
+                    # Redirect drop target to the currently active tab panel
                     parent_item = tabs[parent_item.active_tab_index]
                 else:
+                    # If no tab panel exists yet, automatically create Tab 1
                     tab_height = int(parent_item.attributes.get("tab_height", 21))
                     tab_panel = XUIGraphicsItem("panel", {
                         "name": "tab_1", "label": "Tab 1",
@@ -127,7 +129,7 @@ class CanvasContainer(QGraphicsView):
                     parent_item.add_child_item(tab_panel)
                     parent_item = tab_panel
 
-            # CRITICAL FIX: Convert the absolute scene mouse position to the parent's local coordinate space
+            # Convert absolute scene mouse position to the parent's local coordinate space
             local_pos = parent_item.mapFromScene(scene_pos)
 
             # Snap to parent's internal 10x10 grid without drifting
@@ -138,7 +140,7 @@ class CanvasContainer(QGraphicsView):
             new_item = XUIGraphicsItem(tag_name, {"left": str(int(local_x)), "top": str(int(local_y))})
             new_item.setPos(local_x, local_y)
 
-            # Nest it
+            # Nest it inside the target container/panel
             parent_item.add_child_item(new_item)
             new_item.sync_attributes_to_geometry()
 

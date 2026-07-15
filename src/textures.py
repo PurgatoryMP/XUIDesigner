@@ -2,22 +2,29 @@ import os
 from PIL import Image
 from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QImage, QPixmap, QPainter
+from config import CONFIG
 
 
 class TextureManager:
     """Singleton texture loader that dynamically indexes ALL viewer textures."""
     _instance = None
 
-    def __init__(self, skin_base_path="G:/viewer/indra/newview/skins/default/textures"):
+    def __init__(self, skin_base_path=None):
+        if skin_base_path is None:
+            skin_base_path = CONFIG.get("paths", {}).get(
+                "textures_path",
+                "C:/Program Files/SecondLifeViewer/skins/default/textures"
+            )
         self.base_path = skin_base_path
         self.cache = {}
         self.texture_index = {}
         self._build_index()
 
     def set_base_path(self, path):
-        self.base_path = path
-        self.cache.clear()
-        self._build_index()
+        if self.base_path != path:
+            self.base_path = path
+            self.cache.clear()
+            self._build_index()
 
     def _build_index(self):
         """Recursively scans the texture directory to build a lookup index."""
@@ -42,8 +49,16 @@ class TextureManager:
 
     @classmethod
     def get(cls):
+        # Dynamically fetch the current configured path
+        current_path = CONFIG.get("paths", {}).get(
+            "textures_path",
+            "C:/Program Files/SecondLifeViewer/skins/default/textures"
+        )
         if cls._instance is None:
-            cls._instance = TextureManager()
+            cls._instance = TextureManager(current_path)
+        elif cls._instance.base_path != current_path:
+            # If the user updated the path in Preferences, update the singleton automatically
+            cls._instance.set_base_path(current_path)
         return cls._instance
 
     def get_pixmap(self, texture_key):

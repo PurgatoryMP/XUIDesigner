@@ -1,7 +1,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QPushButton,
-    QHBoxLayout, QMessageBox, QColorDialog, QLabel, QWidget
+    QHBoxLayout, QMessageBox, QColorDialog, QLabel, QWidget,
+    QLineEdit, QFileDialog, QGroupBox, QScrollArea
 )
 from PySide6.QtGui import QColor
 from config import CONFIG, save_config
@@ -11,61 +12,113 @@ class PreferencesDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("XUI Designer Preferences")
-        self.resize(400, 450)
+        self.resize(500, 550)
 
-        layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
+        main_layout = QVBoxLayout(self)
+
+        # Scroll area in case preferences grow large
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
 
         self.picked_colors = {}
+        self.picked_paths = {}
 
-        # Syntax Colors
+        # --- Section 1: Second Life Paths ---
+        paths_group = QGroupBox("Second Life Viewer Paths")
+        paths_layout = QFormLayout(paths_group)
+        for key, val in CONFIG.get("paths", {}).items():
+            path_widget = self._make_path_picker(key, val)
+            label_text = key.replace('_', ' ').title() + ":"
+            paths_layout.addRow(label_text, path_widget)
+        scroll_layout.addWidget(paths_group)
+
+        # --- Section 2: Syntax Colors ---
+        syntax_group = QGroupBox("Syntax Highlighting Colors")
+        syntax_layout = QFormLayout(syntax_group)
         for key, val in CONFIG["syntax_colors"].items():
             color_widget = self._make_color_picker("syntax", key, val)
-            form_layout.addRow(f"Syntax - {key.capitalize()}:", color_widget)
+            syntax_layout.addRow(f"{key.capitalize()}:", color_widget)
+        scroll_layout.addWidget(syntax_group)
 
-        # UI Colors
+        # --- Section 3: UI Colors ---
+        ui_group = QGroupBox("Interface Colors")
+        ui_layout = QFormLayout(ui_group)
         for key, val in CONFIG["ui_colors"].items():
             color_widget = self._make_color_picker("ui", key, val)
-            form_layout.addRow(f"UI - {key.replace('_', ' ').capitalize()}:", color_widget)
+            ui_layout.addRow(f"{key.replace('_', ' ').capitalize()}:", color_widget)
+        scroll_layout.addWidget(ui_group)
 
-        layout.addLayout(form_layout)
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
 
+        # --- Bottom Action Buttons ---
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Save && Restart")
         save_btn.clicked.connect(self.save_and_close)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
-
-        btn_layout.addWidget(cancel_btn)
+        btn_layout.addStretch()
         btn_layout.addWidget(save_btn)
-        layout.addLayout(btn_layout)
+        btn_layout.addWidget(cancel_btn)
+        main_layout.addLayout(btn_layout)
 
-    def _make_color_picker(self, section, key, initial_hex):
-        """Creates a clickable color swatch and hex label pair."""
-        full_key = f"{section}_{key}"
+    def _make_path_picker(self, key, initial_path):
+        container = QWidget()
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+
+        edit = QLineEdit(initial_path)
+        self.picked_paths[key] = initial_path
+
+        def on_text_changed(text):
+            self.picked_paths[key] = text
+
+        edit.textChanged.connect(on_text_changed)
+
+        btn = QPushButton("Browse...")
+        btn.setCursor(Qt.PointingHandCursor)
+
+        def browse_folder():
+            dir_path = QFileDialog.getExistingDirectory(
+                self,
+                f"Select Directory for {key.replace('_', ' ').title()}",
+                edit.text()
+            )
+            if dir_path:
+                edit.setText(dir_path)
+                self.picked_paths[key] = dir_path
+
+        btn.clicked.connect(browse_folder)
+
+        h_layout.addWidget(edit)
+        h_layout.addWidget(btn)
+        return container
+
+    def _make_color_picker(self, category, key, initial_hex):
+        full_key = f"{category}_{key}"
         self.picked_colors[full_key] = initial_hex
 
         container = QWidget()
         h_layout = QHBoxLayout(container)
         h_layout.setContentsMargins(0, 0, 0, 0)
 
-        # The interactive color swatch button
         btn = QPushButton()
         btn.setStyleSheet(f"background-color: {initial_hex}; border: 1px solid #777; border-radius: 3px;")
         btn.setFixedSize(40, 22)
         btn.setCursor(Qt.PointingHandCursor)
 
-        # The hex code display label
         lbl = QLabel(initial_hex)
         lbl.setFixedWidth(60)
 
         def pick_color():
             current_color = QColor(self.picked_colors[full_key])
-            # Open the native OS Color Picker Dialog
             new_color = QColorDialog.getColor(current_color, self, f"Select Color for {key.capitalize()}")
 
             if new_color.isValid():
-                hex_val = new_color.name()  # Returns format #RRGGBB
+                hex_val = new_color.name()
                 self.picked_colors[full_key] = hex_val
                 btn.setStyleSheet(f"background-color: {hex_val}; border: 1px solid #777; border-radius: 3px;")
                 lbl.setText(hex_val)
@@ -79,13 +132,25 @@ class PreferencesDialog(QDialog):
         return container
 
     def save_and_close(self):
-        # Save values back to the global CONFIG dictionary
+        # Save paths
+        if "paths" not in CONFIG:
+            CONFIG["paths"] = {}
+        for key, val in self.picked_paths.items():
+            CONFIG["paths"][key] = val
+
+        # Save syntax colors
         for key in CONFIG["syntax_colors"]:
             CONFIG["syntax_colors"][key] = self.picked_colors[f"syntax_{key}"]
 
+        # Save UI colors
         for key in CONFIG["ui_colors"]:
             CONFIG["ui_colors"][key] = self.picked_colors[f"ui_{key}"]
 
         save_config(CONFIG)
-        QMessageBox.information(self, "Saved", "Preferences saved. Please restart the application to apply UI changes.")
+
+        QMessageBox.information(
+            self,
+            "Preferences Saved",
+            "Preferences have been saved. Please restart the application if path or color changes do not take immediate effect."
+        )
         self.accept()

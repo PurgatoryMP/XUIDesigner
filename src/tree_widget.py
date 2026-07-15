@@ -163,9 +163,11 @@ class SceneTreeWidget(QTreeWidget):
         if xui_item:
             it = QTreeWidgetItemIterator(self)
             while it.value():
-                if it.value().data(0, Qt.UserRole) == xui_item:
-                    it.value().setSelected(True)
-                    self.scrollToItem(it.value())
+                item = it.value()
+                if item.data(0, Qt.UserRole) == xui_item:
+                    item.setSelected(True)
+                    self.setCurrentItem(item)  # Sets active focus on the tree node
+                    self.scrollToItem(item, QAbstractItemView.PositionAtCenter)  # Auto-scrolls into view
                     break
                 it += 1
         self.syncing = False

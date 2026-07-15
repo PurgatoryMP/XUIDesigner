@@ -404,32 +404,39 @@ class MainWindow(QMainWindow):
             TextureManager.get().set_base_path(dir_path)
             self.canvas.scene.update()
 
-    def _resolve_external_file(self, ref_file):
-        """Resolves external XML references across local, widget, and SL skin folder hierarchies."""
-        if not ref_file:
+    def _resolve_external_file(self, filename):
+        """Resolves XML filenames by checking local folders and configured SL XUI installation paths."""
+        if not filename:
             return None
 
-        candidates = []
-        if self.current_working_dir:
-            candidates.append(os.path.join(self.current_working_dir, ref_file))
-            candidates.append(os.path.join(self.current_working_dir, "widgets", ref_file))
-            candidates.append(os.path.join(self.current_working_dir, "..", ref_file))
-            candidates.append(os.path.join(self.current_working_dir, "..", "widgets", ref_file))
+        # 1. Check current working directory or relative path
+        if hasattr(self, 'current_working_dir') and self.current_working_dir:
+            local_path = os.path.join(self.current_working_dir, filename)
+            if os.path.exists(local_path):
+                return local_path
 
-        try:
-            tm_base = TextureManager.get().base_path
-            if tm_base:
-                skin_root = os.path.normpath(os.path.join(tm_base, ".."))
-                candidates.append(os.path.join(skin_root, "xui", "en", ref_file))
-                candidates.append(os.path.join(skin_root, "xui", "en", "widgets", ref_file))
-                candidates.append(os.path.join(skin_root, "xui", "en", "panel", ref_file))
-        except Exception:
-            pass
+        if os.path.exists(filename):
+            return filename
 
-        for path in candidates:
-            norm_path = os.path.normpath(path)
-            if os.path.exists(norm_path) and os.path.isfile(norm_path):
-                return norm_path
+        # 2. Check Second Life XUI path defined in Preferences
+        xui_dir = CONFIG.get("paths", {}).get("xui_path", "")
+        if xui_dir and os.path.exists(xui_dir):
+            # Direct match in xui/en/
+            sl_path = os.path.join(xui_dir, filename)
+            if os.path.exists(sl_path):
+                return sl_path
+
+            # Common Second Life subdirectories to search
+            sub_dirs = ["widgets", "windows", "icons", "taskpanel", "navbar"]
+            for sub in sub_dirs:
+                sub_path = os.path.join(xui_dir, sub, filename)
+                if os.path.exists(sub_path):
+                    return sub_path
+
+            # Recursive search fallback across the entire xui_dir if not found above
+            for root, dirs, files in os.walk(xui_dir):
+                if filename in files:
+                    return os.path.join(root, filename)
 
         return None
 
