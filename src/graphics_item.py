@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtCore import Qt, QRectF, QPointF, QLineF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QCursor, QFont
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem
 from registry import LLVIEW_PARAMS, LLUICTRL_PARAMS, XUI_REGISTRY
@@ -218,24 +218,50 @@ class XUIGraphicsItem(QGraphicsRectItem):
     # SMART CONTAINER MANAGERS
     # ------------------------------------------------------------------------
     def update_tabs(self):
-        if self.tag_name != "tab_container": return
+        if self.tag_name != "tab_container":
+            return
 
         tabs = [c for c in self.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
         if self.active_tab_index >= len(tabs):
             self.active_tab_index = max(0, len(tabs) - 1)
 
+        tab_pos_side = self.attributes.get("tab_position", "top").lower()
         tab_height = int(self.attributes.get("tab_height", 21))
-        container_w = self.attributes.get("width", "250")
-        container_h = str(max(10, int(self.attributes.get("height", "180")) - tab_height - 2))
+        tab_width_attr = int(self.attributes.get("tab_width", 80))
+
+        container_w = float(self.attributes.get("width", 250))
+        container_h = float(self.attributes.get("height", 180))
+
+        # Calculate child panel bounding box based on header side
+        if tab_pos_side == "top":
+            panel_x, panel_y = 2.0, float(tab_height + 2)
+            panel_w = max(10.0, container_w - 4.0)
+            panel_h = max(10.0, container_h - tab_height - 4.0)
+        elif tab_pos_side == "bottom":
+            panel_x, panel_y = 2.0, 2.0
+            panel_w = max(10.0, container_w - 4.0)
+            panel_h = max(10.0, container_h - tab_height - 4.0)
+        elif tab_pos_side == "left":
+            panel_x, panel_y = float(tab_width_attr + 2), 2.0
+            panel_w = max(10.0, container_w - tab_width_attr - 4.0)
+            panel_h = max(10.0, container_h - 4.0)
+        elif tab_pos_side == "right":
+            panel_x, panel_y = 2.0, 2.0
+            panel_w = max(10.0, container_w - tab_width_attr - 4.0)
+            panel_h = max(10.0, container_h - 4.0)
+        else:
+            panel_x, panel_y = 2.0, float(tab_height + 2)
+            panel_w = max(10.0, container_w - 4.0)
+            panel_h = max(10.0, container_h - tab_height - 4.0)
 
         for i, tab in enumerate(tabs):
             is_active = (i == self.active_tab_index)
             tab.setVisible(is_active)
-            tab.setPos(2, tab_height + 2)
-            tab.attributes["left"] = "2"
-            tab.attributes["top"] = str(tab_height + 2)
+            tab.setPos(panel_x, panel_y)
+            tab.attributes["left"] = str(int(panel_x))
+            tab.attributes["top"] = str(int(panel_y))
             try:
-                tab.resize_item(float(container_w) - 4, float(container_h))
+                tab.resize_item(panel_w, panel_h)
             except ValueError:
                 pass
         self.update_z_orders()
@@ -342,7 +368,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
             pos = event.pos()
 
             if self.tag_name == "tab_container":
-                # Check if clicking the '+' button to spawn a new tab panel
+                # Check '+' button click to spawn new tab
                 if hasattr(self, '_plus_btn_rect') and self._plus_btn_rect and self._plus_btn_rect.contains(pos):
                     actual_panels = [c for c in self.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
                     new_idx = len(actual_panels) + 1
@@ -361,42 +387,35 @@ class XUIGraphicsItem(QGraphicsRectItem):
                     event.accept()
                     return
 
-                # Check if clicking an existing tab header to switch tabs
-                tab_height = int(self.attributes.get("tab_height", 21))
-                if pos.y() <= tab_height:
-                    actual_panels = [c for c in self.child_xui_items if c.tag_name in ["panel", "layout_panel"]]
-                    if actual_panels:
-                        tab_x = 2
-                        for i, tab_panel in enumerate(actual_panels):
-                            tab_label = tab_panel.attributes.get("label", tab_panel.attributes.get("title",
-                                                                                                   tab_panel.attributes.get(
-                                                                                                       "name",
-                                                                                                       "Unnamed Tab")))
-                            min_w = int(self.attributes.get("tab_min_width", 60))
-                            max_w = int(self.attributes.get("tab_max_width", 150))
-                            is_active = (i == self.active_tab_index)
-                            extra_w = 20 if is_active else 0
-                            calc_width = max(min_w, min(max_w, len(tab_label) * 7 + 20)) + extra_w
+                # Check tab header clicks to switch tabs
+                if hasattr(self, '_tab_header_rects') and self._tab_header_rects:
+                    for idx, tab_rect in self._tab_header_rects:
+                        if tab_rect.contains(pos):
+                            self.active_tab_index = idx
+                            self.update_tabs()
+                            self.scene().update()
 
-                            if tab_x <= pos.x() <= tab_x + calc_width:
-                                self.active_tab_index = i
-                                self.update_tabs()
-                                self.scene().update()
+                            if hasattr(self.scene(), 'canvas_container'):
+                                self.scene().canvas_container.item_modified_signal.emit(self)
 
-                                if hasattr(self.scene(), 'canvas_container'):
-                                    self.scene().canvas_container.item_modified_signal.emit(self)
+                            super().mousePressEvent(event)
+                            return
 
-                                super().mousePressEvent(event)
-                                return
-                            tab_x += calc_width
-
-                # --- Handle Delete Button & Resize Handles ---
+                # --- Handle Delete Button & Resize Handles (Consolidated) ---
             if self.isSelected():
                 if self._get_delete_rect().contains(pos):
                     if hasattr(self.scene(), 'canvas_container'):
                         self.scene().canvas_container.delete_item(self)
                     event.accept()
                     return
+
+                handles = self._get_handles()
+                for h_id, r in handles.items():
+                    if r.contains(pos):
+                        self.resizing = True
+                        self.resize_dir = h_id
+                        event.accept()
+                        return
 
                 handles = self._get_handles()
                 for h_id, r in handles.items():
@@ -666,30 +685,64 @@ class XUIGraphicsItem(QGraphicsRectItem):
             painter.setPen(QPen(QColor("#555555"), 1))
             painter.drawRect(rect)
 
+            tab_pos_side = self.attributes.get("tab_position", "top").lower()
             tab_height = int(self.attributes.get("tab_height", 21))
-            header_rect = QRectF(rect.x(), rect.y(), rect.width(), tab_height)
+            tab_width_attr = int(self.attributes.get("tab_width", 80))
+            min_w = int(self.attributes.get("tab_min_width", 60))
+            max_w = int(self.attributes.get("tab_max_width", 150))
+
+            actual_panels = [c for c in getattr(self, 'child_xui_items', []) if c.tag_name in ["panel", "layout_panel"]]
+            self._tab_header_rects = []
+            self._plus_btn_rect = None
+
+            # 1. Resolve Header Area & Divider Line
+            if tab_pos_side == "top":
+                header_rect = QRectF(rect.x(), rect.y(), rect.width(), tab_height)
+                divider_line = QLineF(rect.left(), rect.top() + tab_height, rect.right(), rect.top() + tab_height)
+            elif tab_pos_side == "bottom":
+                header_rect = QRectF(rect.x(), rect.bottom() - tab_height, rect.width(), tab_height)
+                divider_line = QLineF(rect.left(), rect.bottom() - tab_height, rect.right(), rect.bottom() - tab_height)
+            elif tab_pos_side == "left":
+                header_rect = QRectF(rect.x(), rect.y(), tab_width_attr, rect.height())
+                divider_line = QLineF(rect.left() + tab_width_attr, rect.top(), rect.left() + tab_width_attr, rect.bottom())
+            elif tab_pos_side == "right":
+                header_rect = QRectF(rect.right() - tab_width_attr, rect.y(), tab_width_attr, rect.height())
+                divider_line = QLineF(rect.right() - tab_width_attr, rect.top(), rect.right() - tab_width_attr, rect.bottom())
+            else:
+                header_rect = QRectF(rect.x(), rect.y(), rect.width(), tab_height)
+                divider_line = QLineF(rect.left(), rect.top() + tab_height, rect.right(), rect.top() + tab_height)
+
             painter.fillRect(header_rect, QColor("#141414"))
-            painter.drawLine(rect.left(), rect.top() + tab_height, rect.right(), rect.top() + tab_height)
+            painter.drawLine(divider_line)
 
-            actual_panels = [c for c in getattr(self, 'child_xui_items', []) if
-                             c.tag_name in ["panel", "layout_panel"]]
-            tab_x = 2
-
+            # 2. Draw Individual Tabs
+            offset = 2
             for i, tab_panel in enumerate(actual_panels):
-                tab_label = tab_panel.attributes.get("label", tab_panel.attributes.get("title",
-                                                                                       tab_panel.attributes.get(
-                                                                                           "name", "Unnamed Tab")))
-                min_w = int(self.attributes.get("tab_min_width", 60))
-                max_w = int(self.attributes.get("tab_max_width", 150))
+                tab_label = tab_panel.attributes.get("label", tab_panel.attributes.get("title", tab_panel.attributes.get("name", "Unnamed Tab")))
                 is_active = (i == self.active_tab_index)
-                extra_w = 20 if is_active else 0
-                calc_width = max(min_w, min(max_w, len(tab_label) * 7 + 20)) + extra_w
 
-                tab_rect = QRectF(rect.x() + tab_x, rect.y(), calc_width, tab_height)
+                if tab_pos_side in ["top", "bottom"]:
+                    extra_w = 20 if is_active else 0
+                    calc_size = max(min_w, min(max_w, len(tab_label) * 7 + 20)) + extra_w
+                    tab_rect = QRectF(rect.x() + offset, header_rect.y(), calc_size, tab_height)
+                else:
+                    # Vertical layout (left/right): Height per tab defaults to tab_height
+                    calc_size = max(20, tab_height + (6 if is_active else 0))
+                    tab_rect = QRectF(header_rect.x(), rect.y() + offset, tab_width_attr, calc_size)
+
+                self._tab_header_rects.append((i, tab_rect))
+
                 if is_active:
                     painter.fillRect(tab_rect, QColor("#2b2b2b"))
                     painter.setPen(QPen(QColor("#1e457c"), 2))
-                    painter.drawLine(tab_rect.left(), tab_rect.bottom(), tab_rect.right(), tab_rect.bottom())
+                    if tab_pos_side == "top":
+                        painter.drawLine(tab_rect.left(), tab_rect.bottom(), tab_rect.right(), tab_rect.bottom())
+                    elif tab_pos_side == "bottom":
+                        painter.drawLine(tab_rect.left(), tab_rect.top(), tab_rect.right(), tab_rect.top())
+                    elif tab_pos_side == "left":
+                        painter.drawLine(tab_rect.right(), tab_rect.top(), tab_rect.right(), tab_rect.bottom())
+                    elif tab_pos_side == "right":
+                        painter.drawLine(tab_rect.left(), tab_rect.top(), tab_rect.left(), tab_rect.bottom())
                     painter.setPen(QPen(QColor("#FFFFFF")))
                 else:
                     painter.fillRect(tab_rect, QColor("#222222"))
@@ -697,10 +750,14 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
                 painter.drawRect(tab_rect)
                 painter.drawText(tab_rect.adjusted(4, 0, -4, 0), Qt.AlignCenter | Qt.AlignVCenter, tab_label)
-                tab_x += calc_width
+                offset += calc_size
 
-            # Draw the '+' button for adding new tabs
-            self._plus_btn_rect = QRectF(rect.x() + tab_x + 4, rect.y() + 2, 20, tab_height - 4)
+            # 3. Draw '+' Button
+            if tab_pos_side in ["top", "bottom"]:
+                self._plus_btn_rect = QRectF(rect.x() + offset + 4, header_rect.y() + 2, 20, tab_height - 4)
+            else:
+                self._plus_btn_rect = QRectF(header_rect.x() + 2, rect.y() + offset + 4, tab_width_attr - 4, 20)
+
             painter.fillRect(self._plus_btn_rect, QColor("#333333"))
             painter.setPen(QPen(QColor("#AAAAAA")))
             painter.drawRect(self._plus_btn_rect)

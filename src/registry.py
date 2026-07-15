@@ -65,7 +65,11 @@ XUI_REGISTRY = {
             "label": "Tab Container", "desc": "Tabbed panel container",
             "params": {
                 **LLVIEW_PARAMS,
-                "tab_position": {"type": "combo", "options": ["top", "bottom", "left", "right"], "default": "top", "group": "Tabs"}
+                "tab_position": {"type": "combo", "options": ["top", "bottom", "left", "right"], "default": "top", "group": "Tabs"},
+                "tab_height": {"type": "int", "default": "21", "group": "Tabs"},
+                "tab_width": {"type": "int", "default": "80", "group": "Tabs"},
+                "tab_min_width": {"type": "int", "default": "60", "group": "Tabs"},
+                "tab_max_width": {"type": "int", "default": "150", "group": "Tabs"}
             }
         },
         "scroll_container": {
