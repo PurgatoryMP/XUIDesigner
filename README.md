@@ -8,6 +8,10 @@ By bridging the gap between raw XML coding and in-viewer testing, the designer r
 
 ---
 
+![XUIDesigner](screenshots/screenshot0.png)
+
+---
+
 ## ⚙️ Prerequisites & Setup
 
 **Crucial Note on Textures:** To render the UI correctly, this application relies on the actual graphic assets used by the Second Life viewer. Because these textures are not bundled with this repository, **you must have a local copy of the Second Life viewer source code**.
