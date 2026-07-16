@@ -30,6 +30,8 @@ class XMLHighlighter(QSyntaxHighlighter):
         comm_fmt.setForeground(QColor(cols["comment"]))
         self.highlighting_rules.append((QRegularExpression(r""), comm_fmt))
 
+        self.rehighlight()
+
     def highlightBlock(self, text):
         for pattern, text_format in self.highlighting_rules:
             match_iterator = pattern.globalMatch(text)

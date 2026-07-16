@@ -3,12 +3,12 @@ import xml.etree.ElementTree as ET
 from PySide6.QtCore import Qt, QPointF, QMimeData, QTimer
 from PySide6.QtGui import (
     QFont, QAction, QDrag, QTextDocument, QTextCursor, QTextFormat,
-    QTextCharFormat, QColor, QBrush
+    QTextCharFormat, QColor, QBrush, QPalette
 )
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
     QTextEdit, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QTabWidget
+    QLineEdit, QPushButton, QTabWidget, QApplication
 )
 from registry import XUI_REGISTRY
 from textures import TextureManager
@@ -88,10 +88,6 @@ class MainWindow(QMainWindow):
         file_menu.addAction(save_act)
 
         file_menu.addSeparator()
-
-        set_skin_act = QAction("Set Viewer Texture Folder...", self)
-        set_skin_act.triggered.connect(self._set_texture_folder)
-        file_menu.addAction(set_skin_act)
 
         edit_menu = menubar.addMenu("&Edit")
         pref_act = QAction("Preferences...", self)
@@ -190,6 +186,48 @@ class MainWindow(QMainWindow):
         self.canvas.item_modified_signal.connect(self._on_canvas_item_modified)
         self.inspector.property_changed_signal.connect(self._queue_refresh)
         self.scene_tree.tree_refreshed.connect(self._reapply_tree_search)
+
+    def apply_live_preferences(self):
+        """Push preference changes live across the entire application hierarchy."""
+        # 1. Update Global Qt Application Palette
+        app = QApplication.instance()
+        if app:
+            palette = QPalette()
+            palette.setColor(QPalette.Window, QColor(CONFIG["ui_colors"]["window_bg"]))
+            palette.setColor(QPalette.WindowText, QColor(CONFIG["ui_colors"]["window_text"]))
+            palette.setColor(QPalette.Base, QColor(CONFIG["ui_colors"]["tree_bg"]))
+            palette.setColor(QPalette.AlternateBase, QColor(CONFIG["ui_colors"]["window_bg"]))
+            palette.setColor(QPalette.Text, QColor(CONFIG["ui_colors"]["window_text"]))
+            palette.setColor(QPalette.Button, QColor(CONFIG["ui_colors"]["window_bg"]))
+            palette.setColor(QPalette.ButtonText, QColor(CONFIG["ui_colors"]["window_text"]))
+
+            highlight_color = QColor(CONFIG["ui_colors"]["highlight"])
+            palette.setColor(QPalette.Highlight, highlight_color)
+            palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+            palette.setColor(QPalette.Inactive, QPalette.Highlight, highlight_color)
+            palette.setColor(QPalette.Inactive, QPalette.HighlightedText, QColor("#FFFFFF"))
+            app.setPalette(palette)
+
+        # 2. Update 2D Canvas Background & Force Scene Repaint (for textures)
+        if hasattr(self, "canvas") and self.canvas:
+            self.canvas.setBackgroundBrush(QBrush(QColor(CONFIG["ui_colors"]["canvas_bg"])))
+            self.canvas.scene.update()
+
+        # 3. Refresh Left-Hand Widget Palette Tree
+        if hasattr(self, "palette_tree") and self.palette_tree:
+            self.palette_tree.clear()
+            if hasattr(self.palette_tree, "populate_tree"):
+                self.palette_tree.populate_tree()
+
+        # 4. Rebuild Syntax Highlighting in All Open Code Tabs
+        if hasattr(self, "code_tabs") and self.code_tabs:
+            for i in range(self.code_tabs.count()):
+                editor = self.code_tabs.widget(i)
+                # Locate attached XMLHighlighter instance on the editor's document
+                for child in editor.children():
+                    if isinstance(child, XMLHighlighter):
+                        child.rebuild_rules()
+                        break
 
     def _open_preferences(self):
         dlg = PreferencesDialog(self)
@@ -397,12 +435,6 @@ class MainWindow(QMainWindow):
         self.code_editors.clear()
         self.compiled_results.clear()
         self._scroll_to_selection_pending = False
-
-    def _set_texture_folder(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Viewer Textures", TextureManager.get().base_path)
-        if dir_path:
-            TextureManager.get().set_base_path(dir_path)
-            self.canvas.scene.update()
 
     def _resolve_external_file(self, filename):
         """Resolves XML filenames by checking local folders and configured SL XUI installation paths."""

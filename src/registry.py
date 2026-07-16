@@ -1,7 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
 import re
-from config import CONFIG
+from config import CONFIG, get_xui_path
 
 LLVIEW_PARAMS = {
     "designer_export_geometry": {"type": "bool", "default": "true", "group": "Designer Tools"},
@@ -300,30 +300,37 @@ def _register_xml_content(content, source_name="Unknown"):
     except Exception as e:
         pass
 
+def reload_registry():
+    """Clears and re-indexes all XUI schemas from the currently active skin directory."""
+    XUI_REGISTRY["Imported Viewer Widgets"].clear()
 
-# 1. Attempt to load from configured Second Life XUI path
-xui_dir = CONFIG.get("paths", {}).get("xui_path", "")
-if xui_dir and os.path.exists(xui_dir):
-    scan_dirs = [xui_dir]
-    widgets_sub = os.path.join(xui_dir, "widgets")
-    if os.path.exists(widgets_sub):
-        scan_dirs.append(widgets_sub)
+    xui_dir = get_xui_path()
+    if xui_dir and os.path.exists(xui_dir):
+        scan_dirs = [xui_dir]
+        widgets_sub = os.path.join(xui_dir, "widgets")
+        if os.path.exists(widgets_sub):
+            scan_dirs.append(widgets_sub)
 
-    for folder in scan_dirs:
-        for fname in os.listdir(folder):
-            if fname.endswith(".xml"):
-                full_p = os.path.join(folder, fname)
-                try:
-                    with open(full_p, "r", encoding="utf-8", errors="ignore") as f:
-                        _register_xml_content(f.read(), source_name=fname)
-                except Exception:
-                    pass
+        for folder in scan_dirs:
+            for fname in os.listdir(folder):
+                if fname.endswith(".xml"):
+                    full_p = os.path.join(folder, fname)
+                    try:
+                        with open(full_p, "r", encoding="utf-8", errors="ignore") as f:
+                            _register_xml_content(f.read(), source_name=fname)
+                    except Exception:
+                        pass
 
-# 2. Fallback: Load local combined_widgets_context.xml if present
-combined_path = "combined_widgets_context.xml"
-if os.path.exists(combined_path):
-    try:
-        with open(combined_path, "r", encoding="utf-8") as f:
-            _register_xml_content(f.read(), source_name="combined_widgets")
-    except Exception as e:
-        pass
+    # Fallback if the active folder yielded no definitions
+    if not XUI_REGISTRY["Imported Viewer Widgets"]:
+        combined_path = "combined_widgets_context.xml"
+        if os.path.exists(combined_path):
+            try:
+                with open(combined_path, "r", encoding="utf-8", errors="ignore") as f:
+                    _register_xml_content(f.read(), source_name="combined_widgets_context.xml")
+            except Exception:
+                pass
+
+
+# Execute once on initial startup
+reload_registry()

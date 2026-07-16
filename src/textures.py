@@ -2,7 +2,7 @@ import os
 from PIL import Image
 from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QImage, QPixmap, QPainter
-from config import CONFIG
+from config import CONFIG, get_textures_path
 
 
 class TextureManager:
@@ -12,8 +12,7 @@ class TextureManager:
     def __init__(self, skin_base_path=None):
         if skin_base_path is None:
             skin_base_path = CONFIG.get("paths", {}).get(
-                "textures_path",
-                "C:/Program Files/SecondLifeViewer/skins/default/textures"
+                skin_base_path = get_textures_path()
             )
         self.base_path = skin_base_path
         self.cache = {}

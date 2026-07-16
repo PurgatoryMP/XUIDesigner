@@ -5,8 +5,7 @@ CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "paths": {
         "sl_viewer_path": "C:/Program Files/SecondLifeViewer",
-        "textures_path": "C:/Program Files/SecondLifeViewer/skins/default/textures",
-        "xui_path": "C:/Program Files/SecondLifeViewer/skins/default/xui/en"
+        "skin_name": "default"
     },
     "syntax_colors": {
         "header": "#808080",
@@ -52,3 +51,28 @@ def save_config(config_data):
 
 # Global configuration instance
 CONFIG = load_config()
+
+
+def get_skin_path():
+    base = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
+    skin = CONFIG.get("paths", {}).get("skin_name", "default")
+
+    # Resolves standard installation paths (e.g. C:/Program Files/SecondLifeViewer/skins/default)
+    # or custom dev builds (e.g. .../indra/newview/skins/default)
+    skin_dir = os.path.join(base, "skins", skin)
+    if not os.path.exists(skin_dir) and os.path.exists(os.path.join(base, skin)):
+        # Fallback if you point directly to a skins parent folder
+        skin_dir = os.path.join(base, skin)
+    return skin_dir
+
+
+def get_textures_path():
+    return os.path.join(get_skin_path(), "textures")
+
+
+def get_xui_path():
+    skin_p = get_skin_path()
+    en_path = os.path.join(skin_p, "xui", "en")
+    if os.path.exists(en_path):
+        return en_path
+    return os.path.join(skin_p, "xui")
