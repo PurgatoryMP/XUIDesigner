@@ -1,62 +1,67 @@
-# Second Life XUI Designer
+# XUIDesigner — Second Life XUI Professional Layout Editor
 
-> ⚠️ **Note:** This project is currently in active development. Features, UI, and functionality are subject to change.
-
-**Second Life XUI Designer** is a desktop visual layout editor and WYSIWYG Integrated Development Environment (IDE) built with Python and PySide6. It is engineered specifically for creating, inspecting, modifying, and previewing Second Life XML User Interface (XUI) layout files. 
-
-By bridging the gap between raw XML coding and in-viewer testing, the designer renders authentic viewer skins using 9-slice texture scaling and implements an algebraic layout solver to accurately handle Second Life's relative coordinate system.
+XUIDesigner is a modern, high-performance, and professional desktop IDE built in Python and PySide6. It is designed specifically for creating, importing, editing, and compiling Second Life XML User Interface (XUI) layout structures. With live side-by-side visual designing and synchronized XML code generation, it takes the guesswork out of crafting interfaces for Second Life viewers.
 
 ---
 
-![XUIDesigner](screenshots/MainWindow.PNG)
-![XUIDesigner](screenshots/Preferences.PNG)
+## 📸 Screenshots
+
+### Modern Dark-Mode Main Window
+![Main Window](screenshots/MainWindow.PNG)
+
+### Configuration & Theme Customization
+![Preferences Dialog](screenshots/Preferences.PNG)
 
 ---
 
-## ⚙️ Prerequisites & Setup
+## 🚀 Key Features
 
-**Crucial Note on Textures:** To render the UI correctly, this application relies on the actual graphic assets used by the Second Life viewer. Because these textures are not bundled with this repository, **you must have a local copy of the Second Life viewer source code**.
+* **Visual Canvas with Interactive Alignment:** 
+  * Drag-and-drop widget layout directly from a comprehensive, pre-registered XUI Widget Palette.
+  * Real-time 8-way handles for resizing and snapping.
+  * Dynamic grid-snapping slider (adjustable from `2px` to `50px`) with a quick hotkey toggle.
+  * Precise 1:1 hardware ruler bars detailing active coordinate spaces.
 
-1. Download or clone the Second Life viewer source code from Linden Lab.
-2. Locate the default skin textures directory (typically found at `indra/newview/skins/default/textures`).
-3. Set your texture path in the application (via the `File -> Set Viewer Texture Folder...` menu or by updating the default path in `textures.py`) so the designer can load the necessary `.png`, `.tga`, and `.j2c` files.
+* **Live Side-by-Side Synchronized XML Compiler:**
+  * Changes on the canvas compile instantly to clean, compliant Second Life XML format.
+  * Syntax highlighting featuring a robust, built-in XML scanner.
+  * Bi-directional selection tracking: click a widget to jump straight to its code block, or search via the DOM Tree.
 
----
+* **Advanced Tab and Layout Container Mechanics:**
+  * Smart container support including `tab_container`, `layout_stack`, and `layout_panel`.
+  * Create, delete, and switch active tab panels on-the-fly directly inside the canvas.
+  * Automatic `follows` anchor layout recalculation (supporting nested layout constraints).
 
-## 🌟 Key Features
-
-### 🎨 WYSIWYG Interactive Canvas
-* **10px Snapping Grid & Rulers:** The visual canvas features a background grid that automatically snaps widget positions to 10-pixel increments. Built-in top and left rulers display coordinate tick marks and pixel measurements for precise alignment.
-* **Direct Manipulation:** Supports interactive on-canvas drag-and-drop widget placement, moving, and resizing. Selected elements display visual bounding outlines, directional resize handles, and an instant-delete handle.
-* **Smart Drop Redirection:** Dragging new child widgets onto a `tab_container` automatically routes and embeds them directly into the active tab panel. If no tab panel exists, the engine automatically generates a default panel to hold the dropped widget.
-
-### 🖥️ Three-Pane Workspace
-* **Left Pane (Widget Palette):** A categorized drag-and-drop tree palette featuring standard Second Life elements. Categories include **Containers & Windows** (`floater`, `panel`, `tab_container`, `accordion`), **Buttons & Toggles**, **Text & Editors** (`line_editor`, `search_editor`), **Selection Controls** (`slider`, `spinner`, `combo_box`), and **Display Indicators** (`progress_bar`, `icon`).
-* **Center Pane (Canvas & Live XML Source):** A split workspace combining the visual canvas with a real-time Second Life XML source code editor. The XML code view generates standalone, pretty-printed XUI XML that updates instantaneously as you manipulate graphical elements.
-* **Right Pane (DOM Hierarchy & Property Inspector):** Contains a synchronized DOM tree that allows bidirectional selection and drag-and-drop parent-child reordering. Below it, a dynamic Property Inspector automatically generates form controls tailored to the selected widget's schema.
-
-### 🖼️ Authentic Viewer Skin Rendering
-* **Local Viewer Texture Integration:** Includes a texture manager that loads original Second Life viewer assets (supporting PNG, TGA, and J2C formats via Pillow) directly from your local viewer skin folder.
-* **Scale-9 Grid (9-Slice) Scaling:** Implements custom 9-slice texture drawing to ensure that rounded corners, window borders, button bevels, and tab headers scale cleanly without pixel distortion.
-* **Visual State Rendering:** Accurately renders specialized UI states, such as active versus inactive tab headers, checked versus unchecked boxes, and styled floating headers (`LLFloater`).
-
-### 🧮 Robust XML Import & Algebraic Solving
-* **Opposing Anchor Math:** Features an XML importer that resolves Second Life's relative layout geometry. It evaluates simultaneous opposing anchors (such as defining both `left` and `right` or `top` and `bottom` coordinates) to dynamically deduce true element widths, heights, and negative container offsets.
-* **Sibling Delta Calculation:** Supports sequential layout offsets including `left_delta`, `top_delta`, `left_pad`, and `top_pad` relative to preceding sibling elements.
-* **Clean Compilation:** The compiler cleans out empty attributes and formats output with standardized 2-space indentation and UTF-8 encoding.
-
-### 📋 Comprehensive SL Schema Registry
-* **C++ Class Mapping:** Built upon an underlying parameter registry that maps visual controls directly to their Second Life C++ UI counterparts (e.g., `LLView`, `LLUICtrl`, `LLFloater`, `LLButton`, `LLTabContainer`, `LLPanel`).
-* **Grouped Attribute Editing:** The inspector organizes properties into logical collapsible sections based on class inheritance.
-* **Deep Parameter Support:** Allows editing of universal layout behaviors (`follows`, `layout`), data bindings (`value`, `control_name`, `enabled_controls`), typography (`font`, `halign`), and viewer event callbacks (`commit_callback`, `mouseenter_callback`).
+* **Multi-File & Skin Resource Importing:**
+  * Recursively imports and merges secondary sub-XUI XML layout files (e.g., dynamically including headers, footers, or sub-panels).
+  * Automatically searches relative working directories and systemic Second Life Skin configurations to resolve missing asset packages.
+  * Supports custom skin theme parsing and custom 9-slice button/texture preview mapping.
 
 ---
 
-## 🛠️ Technology Stack
+### 🖥️ System & Runtime Requirements
 
-| Component | Technology / Library | Usage in Codebase |
-| :--- | :--- | :--- |
-| **Core Language** | Python 3 | Application logic and algebraic coordinate solvers. |
-| **GUI Framework** | PySide6 (Qt for Python) | Window management, custom `QGraphicsView` canvas, tree widgets, and Fusion UI styling. |
-| **Image Processing** | Pillow (PIL) | Reading and converting viewer texture files (TGA, J2C, PNG) into Qt pixmaps. |
-| **XML Parsing & DOM** | `xml.etree.ElementTree` & `minidom` | Parsing incoming layout files and generating clean, formatted XML output. |
+* **Python 3.10+**: Built using modern performance features, including debounced background processing clocks and structural pattern definitions.
+* **Operating System**: Seamlessly cross-platform, natively supporting **Windows 10/11**, **macOS**, and **Linux**.
+
+---
+
+### 📦 Core Library Dependencies & Hardware Drivers
+
+The application relies on a pair of core library suites to orchestrate graphical presentation and asset processing:
+
+* **Pillow (PIL)**: Manages image decoding and asset pipeline translation. It maps complex Second Life textures (such as high-resolution target `.tga` and `.j2c` arrays) into standard 32-bit pixel buffers (`Format_RGBA8888`).
+* **PySide6 (Qt 6 bindings)**: Drives the IDE workspace. It utilizes the following underlying components:
+  * **`QtWidgets`**: Architectures the dashboard workspace, orchestrating `QGraphicsView`/`QGraphicsScene` 2D visual layouts, multi-pane structural dock splitting (`QSplitter`), dynamic DOM context hierarchical navigation tree nodes (`QTreeWidget`), and side-by-side tabs (`QTabWidget`).
+  * **`QtGui`**: Powers the 2D hardware graphics engines, deploying high-speed drawing brushes (`QPainter`, `QPen`, `QBrush`) to build application UI matrices and handle active texture caches (`QPixmap`, `QImage`).
+  * **`QtCore`**: Routes thread signaling networks (`Signal`/`Slot`), processes hardware drop operations (`QMimeData`), and runs asynchronously debounced timers (`QTimer`) to prevent layout lag.
+* **Standard Python Utility Libraries**:
+  * `xml.etree.ElementTree`: Used directly to ingest, process, and output compliant layouts.
+  * `os` & `sys`: Handles local and global system directories and configurations.
+
+---
+
+### 📂 Workspace Resource Specifications
+
+The designer assumes you have secondlife viewer installed by default and will use the default skin path. you can select the skin directory for any other viewer and select the individual skins from the drop down.
+* **Texture Paths & Viewer Skins (Optional)**: Access to active Second Life skin asset suites, enabling the application's engine to scan and apply custom button metrics and 9-slice textures live.
