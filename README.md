@@ -1,6 +1,7 @@
-# XUIDesigner — Second Life XUI Professional Layout Editor
+# XUIDesigner 
+A Second Life XUI Layout Editor
 
-XUIDesigner is a modern, high-performance, and professional desktop IDE built in Python and PySide6. It is designed specifically for creating, importing, editing, and compiling Second Life XML User Interface (XUI) layout structures. With live side-by-side visual designing and synchronized XML code generation, it takes the guesswork out of crafting interfaces for Second Life viewers.
+XUIDesigner is a modern, high-performance desktop IDE built in Python and PySide6. It is designed specifically for creating, importing, editing, and compiling Second Life XML User Interface (XUI) layout structures. With live side-by-side visual designing and synchronized XML code generation, it takes the guesswork out of crafting interfaces for Second Life viewers.
 
 ---
 
