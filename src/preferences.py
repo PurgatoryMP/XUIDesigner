@@ -1,5 +1,4 @@
 import os
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QPushButton,
@@ -11,15 +10,14 @@ from config import CONFIG, save_config, get_textures_path
 from registry import reload_registry
 from textures import TextureManager
 
+
 class PreferencesDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("XUI Designer Preferences")
-        self.resize(500, 550)
+        self.resize(520, 580)
 
         main_layout = QVBoxLayout(self)
-
-        # Scroll area in case preferences grow large
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QScrollArea.NoFrame)
@@ -28,14 +26,15 @@ class PreferencesDialog(QDialog):
 
         self.picked_colors = {}
 
+        # --- Section 1: Viewer & Skin Settings ---
         paths_group = QGroupBox("Second Life Viewer & Skin Settings")
         paths_layout = QFormLayout(paths_group)
 
-        # 1. Base Viewer Installation Path
         viewer_path = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
         self.viewer_path_edit = QLineEdit(viewer_path)
 
         browse_btn = QPushButton("Browse...")
+        browse_btn.setCursor(Qt.PointingHandCursor)
         browse_btn.clicked.connect(self._browse_viewer_path)
 
         path_box = QHBoxLayout()
@@ -43,7 +42,9 @@ class PreferencesDialog(QDialog):
         path_box.addWidget(browse_btn)
         paths_layout.addRow("Viewer Installation Path:", path_box)
 
+        # Single, unified Skin Selection Dropdown
         self.skin_combo = QComboBox()
+        self.skin_combo.setEditable(True)  # Allow manual entry for new custom skins
         self.populate_skins(viewer_path)
 
         current_skin = CONFIG.get("paths", {}).get("skin_name", "default")
@@ -54,25 +55,13 @@ class PreferencesDialog(QDialog):
             self.skin_combo.setCurrentText(current_skin)
 
         self.viewer_path_edit.textChanged.connect(self.populate_skins)
-
-        # 2. Skin Selection Dropdown (Auto-scans /skins/ directory)
-        self.skin_combo = QComboBox()
-        self.skin_combo.setEditable(True)  # Allows manual entry if folder isn't created yet
-        self._populate_skins(viewer_path)
-
-        current_skin = CONFIG.get("paths", {}).get("skin_name", "default")
-        self.skin_combo.setCurrentText(current_skin)
-
-        # Auto-refresh available skin folders when installation path changes
-        self.viewer_path_edit.textChanged.connect(self._populate_skins)
         paths_layout.addRow("Active Skin Folder:", self.skin_combo)
-
         scroll_layout.addWidget(paths_group)
 
         # --- Section 2: Syntax Colors ---
         syntax_group = QGroupBox("Syntax Highlighting Colors")
         syntax_layout = QFormLayout(syntax_group)
-        for key, val in CONFIG["syntax_colors"].items():
+        for key, val in CONFIG.get("syntax_colors", {}).items():
             color_widget = self._make_color_picker("syntax", key, val)
             syntax_layout.addRow(f"{key.capitalize()}:", color_widget)
         scroll_layout.addWidget(syntax_group)
@@ -80,7 +69,7 @@ class PreferencesDialog(QDialog):
         # --- Section 3: UI Colors ---
         ui_group = QGroupBox("Interface Colors")
         ui_layout = QFormLayout(ui_group)
-        for key, val in CONFIG["ui_colors"].items():
+        for key, val in CONFIG.get("ui_colors", {}).items():
             color_widget = self._make_color_picker("ui", key, val)
             ui_layout.addRow(f"{key.replace('_', ' ').capitalize()}:", color_widget)
         scroll_layout.addWidget(ui_group)
@@ -90,7 +79,7 @@ class PreferencesDialog(QDialog):
 
         # --- Bottom Action Buttons ---
         btn_layout = QHBoxLayout()
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton("Save Preferences")
         save_btn.clicked.connect(self.save_and_close)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
@@ -100,79 +89,57 @@ class PreferencesDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def populate_skins(self, viewer_path=None):
-        """Scans the viewer path for available skins, supporting both root and direct /skins paths."""
-        if not isinstance(viewer_path, str) or not viewer_path:
-            viewer_path = self.viewer_path_edit.text().strip()
+        """Scans viewer installation or direct skins directories for available skins."""
+        try:
+            if not isinstance(viewer_path, str) or not viewer_path:
+                viewer_path = self.viewer_path_edit.text().strip()
 
-        current_selection = self.skin_combo.currentText()
-        self.skin_combo.blockSignals(True)
-        self.skin_combo.clear()
-        skins_found = []
+            current_selection = self.skin_combo.currentText()
+            self.skin_combo.blockSignals(True)
+            self.skin_combo.clear()
+            skins_found = []
 
-        # Case 1: Standard installation (e.g., C:/Program Files/FirestormViewer -> check inside /skins)
-        skins_subdir = os.path.join(viewer_path, "skins")
-        if os.path.exists(skins_subdir) and os.path.isdir(skins_subdir):
-            target_dir = skins_subdir
-        # Case 2: User pointed directly at the 'skins' directory (e.g., .../FirestormViewer/skins)
-        elif os.path.exists(viewer_path) and os.path.isdir(viewer_path):
-            if os.path.exists(os.path.join(viewer_path, "default")):
-                target_dir = viewer_path
+            # Check inside /skins/ subdirectory
+            skins_subdir = os.path.join(viewer_path, "skins")
+            if os.path.exists(skins_subdir) and os.path.isdir(skins_subdir):
+                target_dir = skins_subdir
+            # Check if viewer_path itself is the /skins/ folder
+            elif os.path.exists(viewer_path) and os.path.isdir(viewer_path):
+                if os.path.exists(os.path.join(viewer_path, "default")):
+                    target_dir = viewer_path
+                else:
+                    target_dir = None
             else:
                 target_dir = None
-        else:
-            target_dir = None
 
-        if target_dir and os.path.exists(target_dir):
-            for item in sorted(os.listdir(target_dir)):
-                full_p = os.path.join(target_dir, item)
-                if os.path.isdir(full_p) and not item.startswith('.'):
-                    skins_found.append(item)
+            if target_dir and os.path.exists(target_dir):
+                for item in sorted(os.listdir(target_dir)):
+                    full_p = os.path.join(target_dir, item)
+                    if os.path.isdir(full_p) and not item.startswith('.'):
+                        skins_found.append(item)
 
-        if "default" not in skins_found:
-            skins_found.insert(0, "default")
-        elif skins_found[0] != "default":
-            skins_found.remove("default")
-            skins_found.insert(0, "default")
+            if "default" not in skins_found:
+                skins_found.insert(0, "default")
+            elif skins_found[0] != "default":
+                skins_found.remove("default")
+                skins_found.insert(0, "default")
 
-        self.skin_combo.addItems(skins_found)
+            self.skin_combo.addItems(skins_found)
 
-        # Restore previous selection if it still exists
-        idx = self.skin_combo.findText(current_selection)
-        if idx >= 0:
-            self.skin_combo.setCurrentIndex(idx)
-        self.skin_combo.blockSignals(False)
+            idx = self.skin_combo.findText(current_selection)
+            if idx >= 0:
+                self.skin_combo.setCurrentIndex(idx)
+            elif current_selection:
+                self.skin_combo.setCurrentText(current_selection)
+            else:
+                self.skin_combo.setCurrentIndex(0)
 
-    def _make_path_picker(self, key, initial_path):
-        container = QWidget()
-        h_layout = QHBoxLayout(container)
-        h_layout.setContentsMargins(0, 0, 0, 0)
-
-        edit = QLineEdit(initial_path)
-        self.picked_paths[key] = initial_path
-
-        def on_text_changed(text):
-            self.picked_paths[key] = text
-
-        edit.textChanged.connect(on_text_changed)
-
-        btn = QPushButton("Browse...")
-        btn.setCursor(Qt.PointingHandCursor)
-
-        def browse_folder():
-            dir_path = QFileDialog.getExistingDirectory(
-                self,
-                f"Select Directory for {key.replace('_', ' ').title()}",
-                edit.text()
-            )
-            if dir_path:
-                edit.setText(dir_path)
-                self.picked_paths[key] = dir_path
-
-        btn.clicked.connect(browse_folder)
-
-        h_layout.addWidget(edit)
-        h_layout.addWidget(btn)
-        return container
+            self.skin_combo.blockSignals(False)
+        except Exception as e:
+            print(f"[Verbose Error] Failed populating skin dropdown: {e}")
+            self.skin_combo.blockSignals(False)
+            if self.skin_combo.count() == 0:
+                self.skin_combo.addItem("default")
 
     def _make_color_picker(self, category, key, initial_hex):
         full_key = f"{category}_{key}"
@@ -188,87 +155,70 @@ class PreferencesDialog(QDialog):
         btn.setCursor(Qt.PointingHandCursor)
 
         lbl = QLabel(initial_hex)
-        lbl.setFixedWidth(60)
+        lbl.setFixedWidth(65)
 
         def pick_color():
-            current_color = QColor(self.picked_colors[full_key])
-            new_color = QColorDialog.getColor(current_color, self, f"Select Color for {key.capitalize()}")
-
-            if new_color.isValid():
-                hex_val = new_color.name()
-                self.picked_colors[full_key] = hex_val
-                btn.setStyleSheet(f"background-color: {hex_val}; border: 1px solid #777; border-radius: 3px;")
-                lbl.setText(hex_val)
+            try:
+                current_color = QColor(self.picked_colors[full_key])
+                new_color = QColorDialog.getColor(current_color, self, f"Select Color for {key.capitalize()}")
+                if new_color.isValid():
+                    hex_val = new_color.name()
+                    self.picked_colors[full_key] = hex_val
+                    btn.setStyleSheet(f"background-color: {hex_val}; border: 1px solid #777; border-radius: 3px;")
+                    lbl.setText(hex_val)
+            except Exception as e:
+                print(f"[Verbose Error] Color picker exception: {e}")
 
         btn.clicked.connect(pick_color)
-
         h_layout.addWidget(btn)
         h_layout.addWidget(lbl)
         h_layout.addStretch()
-
         return container
 
     def _browse_viewer_path(self):
-        dir_path = QFileDialog.getExistingDirectory(
-            self, "Select Second Life Viewer Installation Directory", self.viewer_path_edit.text()
-        )
-        if dir_path:
-            self.viewer_path_edit.setText(dir_path)
-
-    def _populate_skins(self, base_path=None):
-        if not base_path or isinstance(base_path, bool):
-            base_path = self.viewer_path_edit.text()
-
-        current = self.skin_combo.currentText()
-        self.skin_combo.clear()
-
-        skins_dir = os.path.join(base_path, "skins")
-        if os.path.exists(skins_dir):
-            try:
-                subdirs = [
-                    d for d in os.listdir(skins_dir)
-                    if os.path.isdir(os.path.join(skins_dir, d))
-                ]
-                self.skin_combo.addItems(sorted(subdirs))
-            except Exception:
-                pass
-
-        if self.skin_combo.count() == 0:
-            self.skin_combo.addItem("default")
-
-        idx = self.skin_combo.findText(current)
-        if idx >= 0:
-            self.skin_combo.setCurrentIndex(idx)
-        else:
-            self.skin_combo.setCurrentText(current or "default")
+        try:
+            dir_path = QFileDialog.getExistingDirectory(
+                self, "Select Second Life Viewer Installation Directory", self.viewer_path_edit.text()
+            )
+            if dir_path:
+                self.viewer_path_edit.setText(dir_path)
+        except Exception as e:
+            print(f"[Verbose Error] _browse_viewer_path failed: {e}")
 
     def save_and_close(self):
-        # Save Viewer Path and Active Skin
-        if "paths" not in CONFIG:
-            CONFIG["paths"] = {}
+        try:
+            if "paths" not in CONFIG:
+                CONFIG["paths"] = {}
 
-        CONFIG["paths"]["sl_viewer_path"] = self.viewer_path_edit.text().strip()
-        CONFIG["paths"]["skin_name"] = self.skin_combo.currentText().strip() or "default"
+            CONFIG["paths"]["sl_viewer_path"] = self.viewer_path_edit.text().strip()
+            CONFIG["paths"]["skin_name"] = self.skin_combo.currentText().strip() or "default"
 
-        # Save syntax colors & UI colors
-        for key in CONFIG["syntax_colors"]:
-            if f"syntax_{key}" in self.picked_colors:
-                CONFIG["syntax_colors"][key] = self.picked_colors[f"syntax_{key}"]
+            for key in CONFIG.get("syntax_colors", {}):
+                if f"syntax_{key}" in self.picked_colors:
+                    CONFIG["syntax_colors"][key] = self.picked_colors[f"syntax_{key}"]
 
-        for key in CONFIG["ui_colors"]:
-            if f"ui_{key}" in self.picked_colors:
-                CONFIG["ui_colors"][key] = self.picked_colors[f"ui_{key}"]
+            for key in CONFIG.get("ui_colors", {}):
+                if f"ui_{key}" in self.picked_colors:
+                    CONFIG["ui_colors"][key] = self.picked_colors[f"ui_{key}"]
 
-        save_config(CONFIG)
+            save_config(CONFIG)
+            reload_registry()
 
-        reload_registry()
+            # Refresh TextureManager cache against new inheritance paths
+            try:
+                if TextureManager._instance:
+                    TextureManager._instance.set_base_path()
+            except Exception as tex_err:
+                print(f"[Verbose Error] Failed refreshing TextureManager paths: {tex_err}")
 
-        if TextureManager._instance:
-            TextureManager._instance.set_base_path()  # Passing None triggers hierarchical get_textures_paths()
+            # Push live UI updates to MainWindow
+            parent_win = self.parent()
+            if parent_win and hasattr(parent_win, "apply_live_preferences"):
+                parent_win.apply_live_preferences()
+            elif parent_win and hasattr(parent_win, "canvas") and parent_win.canvas:
+                parent_win.canvas.scene.update()
 
-        # 3. Trigger Live Application UI Sync on MainWindow
-        parent_win = self.parent()
-        if parent_win and hasattr(parent_win, "canvas") and parent_win.canvas:
-            parent_win.canvas.scene.update()
-
-        self.accept()
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Preferences Error", f"Failed to save preferences:\n{str(e)}")
+            print(f"[Verbose Error] save_and_close exception: {e}")

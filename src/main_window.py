@@ -8,7 +8,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
     QTextEdit, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QTabWidget, QApplication
+    QLineEdit, QPushButton, QTabWidget, QApplication, QMenu
 )
 from registry import XUI_REGISTRY
 from textures import TextureManager
@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         main_splitter = QSplitter(Qt.Horizontal, self)
         self.setCentralWidget(main_splitter)
+        self.inspector = PropertyInspector()
 
         palette_tree = WidgetPaletteTree()
         for cat_name, widgets in XUI_REGISTRY.items():
@@ -135,7 +136,13 @@ class MainWindow(QMainWindow):
         code_layout.addLayout(xml_header_layout)
 
         self.code_tabs = QTabWidget()
+        self.code_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.code_tabs.customContextMenuRequested.connect(self._on_code_tabs_context_menu)
         code_layout.addWidget(self.code_tabs)
+
+        self.inspector.external_file_import_needed.connect(
+            self._import_external_file_to_item
+        )
 
         center_splitter.addWidget(code_container)
         center_splitter.setSizes([650, 300])
@@ -186,6 +193,18 @@ class MainWindow(QMainWindow):
         self.canvas.item_modified_signal.connect(self._on_canvas_item_modified)
         self.inspector.property_changed_signal.connect(self._queue_refresh)
         self.scene_tree.tree_refreshed.connect(self._reapply_tree_search)
+        self.inspector.external_file_import_needed.connect(self._import_external_file_to_item)
+        if self.canvas:
+            self.canvas.item_selected_signal.connect(self._on_item_selected)
+            self.canvas.item_modified_signal.connect(self._on_canvas_item_modified)
+
+        if self.inspector:
+            self.inspector.property_changed_signal.connect(self._queue_refresh)
+            self.inspector.external_file_import_needed.connect(self._import_external_file_to_item)
+
+        if self.scene_tree:
+            self.scene_tree.tree_refreshed.connect(self._reapply_tree_search)
+
 
     def apply_live_preferences(self):
         """Push preference changes live across the entire application hierarchy."""
@@ -437,40 +456,142 @@ class MainWindow(QMainWindow):
         self._scroll_to_selection_pending = False
 
     def _resolve_external_file(self, filename):
-        """Resolves XML filenames by checking local folders and configured SL XUI installation paths."""
+        """Resolves an XML filename against local folders and the Second Life viewer skin directory."""
         if not filename:
             return None
 
-        # 1. Check current working directory or relative path
-        if hasattr(self, 'current_working_dir') and self.current_working_dir:
+        # Case 1: Absolute path or direct local match
+        if os.path.exists(filename):
+            return os.path.abspath(filename)
+
+        # Case 2: Relative to currently open file's working directory
+        if hasattr(self, "current_working_dir") and self.current_working_dir:
             local_path = os.path.join(self.current_working_dir, filename)
             if os.path.exists(local_path):
                 return local_path
 
-        if os.path.exists(filename):
-            return filename
+        # Case 3: Search within configured Second Life Viewer skin / XUI directories
+        try:
+            from config import get_xui_paths
 
-        # 2. Check Second Life XUI path defined in Preferences
-        xui_dir = CONFIG.get("paths", {}).get("xui_path", "")
-        if xui_dir and os.path.exists(xui_dir):
-            # Direct match in xui/en/
-            sl_path = os.path.join(xui_dir, filename)
-            if os.path.exists(sl_path):
-                return sl_path
+            for xui_dir in get_xui_paths():
+                if not os.path.exists(xui_dir):
+                    continue
+                # Check root of XUI directory
+                candidate = os.path.join(xui_dir, filename)
+                if os.path.exists(candidate):
+                    return candidate
 
-            # Common Second Life subdirectories to search
-            sub_dirs = ["widgets", "windows", "icons", "taskpanel", "navbar"]
-            for sub in sub_dirs:
-                sub_path = os.path.join(xui_dir, sub, filename)
-                if os.path.exists(sub_path):
-                    return sub_path
-
-            # Recursive search fallback across the entire xui_dir if not found above
-            for root, dirs, files in os.walk(xui_dir):
-                if filename in files:
-                    return os.path.join(root, filename)
+                # Deep scan inside subdirectories (e.g., /en/, /widgets/, /floater/)
+                for root, _, files in os.walk(xui_dir):
+                    if filename in files:
+                        return os.path.join(root, filename)
+        except Exception as e:
+            print(f"[Verbose Error] _resolve_external_file search failed: {e}")
 
         return None
+
+    def _import_external_file_to_item(self, item, filename):
+        """Dynamically imports an external XML file and attaches it as a live child root to the target item."""
+        if not item or not filename:
+            return
+        try:
+            import xml.etree.ElementTree as ET
+
+            # 1. Remove and clean up any previously imported root children on this node to prevent duplication
+            existing_imports = [
+                c
+                for c in list(getattr(item, "child_xui_items", []))
+                if getattr(c, "is_imported_root", False)
+            ]
+            for old_imp in existing_imports:
+                if hasattr(self, "canvas") and self.canvas:
+                    self.canvas.delete_item(old_imp)
+                elif old_imp in item.child_xui_items:
+                    item.child_xui_items.remove(old_imp)
+                    old_imp.deleteLater()
+
+            # 2. Resolve external file path
+            full_path = self._resolve_external_file(filename)
+            if not full_path or not os.path.exists(full_path):
+                QMessageBox.warning(
+                    self,
+                    "Import Warning",
+                    f"Could not locate external XML file:\n'{filename}'\n\nPlease check your XUI / Skins directory settings.",
+                )
+                print(
+                    f"[Verbose Error] Could not resolve external file to import: '{filename}'"
+                )
+                return
+
+            # 3. Parse XML into XUIGraphicsItem hierarchy
+            child_tree = ET.parse(full_path)
+            imp_root = self._parse_xml_node(
+                child_tree.getroot(), parent_item=item, current_file=filename
+            )
+
+            if not imp_root:
+                print(f"[Verbose Error] XML parsing returned None for '{filename}'")
+                return
+
+            # --- CRITICAL FIX: Explicitly bind Parent, DOM Array, and QGraphicsScene ---
+            imp_root.is_imported_root = True
+            imp_root.attributes["follows"] = "all"
+
+            # A. Ensure QGraphicsItem parent-child relationship is set
+            if imp_root.parentItem() != item:
+                imp_root.setParentItem(item)
+
+            # B. Ensure it is registered in the parent's child_xui_items array (Required for TreeWidget & Compiler!)
+            if not hasattr(item, "child_xui_items"):
+                item.child_xui_items = []
+            if imp_root not in item.child_xui_items:
+                item.child_xui_items.append(imp_root)
+
+            # C. Recursively ensure imp_root and ALL its parsed children are added to the active QGraphicsScene
+            if hasattr(self, "canvas") and self.canvas and self.canvas.scene:
+
+                def register_to_scene(node):
+                    if node.scene() != self.canvas.scene:
+                        self.canvas.scene.addItem(node)
+                    for child in getattr(node, "child_xui_items", []):
+                        register_to_scene(child)
+
+                register_to_scene(imp_root)
+
+            # D. Align geometry to parent container
+            imp_root.setPos(0, 0)
+            try:
+                w = float(item.attributes.get("width", 100))
+                h = float(item.attributes.get("height", 20))
+                imp_root.resize_item(w, h)
+                imp_root.sync_attributes_to_geometry()
+            except ValueError:
+                pass
+
+            # 4. Update Z-orders, refresh DOM Tree, and repaint Canvas
+            if hasattr(item, "update_z_orders"):
+                item.update_z_orders()
+
+            if hasattr(self, "_post_import_layout_pass"):
+                self._post_import_layout_pass(item)
+
+            if hasattr(self, "scene_tree") and self.scene_tree:
+                self.scene_tree.refresh_tree()
+
+            self._queue_refresh()
+
+            if hasattr(self, "canvas") and self.canvas and self.canvas.scene:
+                self.canvas.scene.update()
+
+            print(f"[Success] Dynamically imported '{filename}' into <{item.tag_name}>.")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to dynamically import '{filename}':\n{str(e)}",
+            )
+            print(f"[Verbose Error] _import_external_file_to_item exception: {e}")
 
     def _post_import_layout_pass(self, item):
         """Recursively recalculates layout containers and Z-ordering after full DOM ingestion."""
@@ -617,6 +738,95 @@ class MainWindow(QMainWindow):
                     imp_root.resize_item(width, height)
 
         return item
+
+    def _on_code_tabs_context_menu(self, pos):
+        """Displays right-click context menu on XUI Source Window tabs."""
+        try:
+            tab_bar = self.code_tabs.tabBar()
+            tab_bar_pos = tab_bar.mapFromParent(pos)
+            tab_idx = tab_bar.tabAt(tab_bar_pos)
+
+            # Fallback if user right-clicked within tab body instead of header
+            if tab_idx == -1:
+                tab_idx = self.code_tabs.currentIndex()
+
+            if tab_idx == -1 or self.code_tabs.count() == 0:
+                return
+
+            filename = self.code_tabs.tabText(tab_idx)
+
+            menu = QMenu(self)
+            save_act = menu.addAction(f"Save '{filename}'")
+            save_as_act = menu.addAction(f"Save '{filename}' As...")
+            menu.addSeparator()
+            save_all_act = menu.addAction("Save All")
+
+            save_act.triggered.connect(lambda: self._save_single_file(filename))
+            save_as_act.triggered.connect(lambda: self._save_single_file_as(filename))
+            save_all_act.triggered.connect(self._save_all_files)
+
+            menu.exec(self.code_tabs.mapToGlobal(pos))
+        except Exception as e:
+            QMessageBox.critical(self, "Context Menu Error", f"Failed to open tab context menu:\n{str(e)}")
+            print(f"[Verbose Error] _on_code_tabs_context_menu exception: {e}")
+
+    def _save_single_file(self, filename):
+        """Saves a single compiled XML file to disk."""
+        if not self.canvas.root_container_instance:
+            return
+        try:
+            results = XUICompiler.generate_source(self.canvas.root_container_instance, None)
+            if filename not in results:
+                QMessageBox.warning(self, "Save Warning", f"Could not find compiled source for '{filename}'.")
+                return
+
+            xml_str, _ = results[filename]
+
+            # Try to resolve existing path
+            target_path = self._resolve_external_file(filename)
+            if not target_path and self.current_working_dir:
+                target_path = os.path.join(self.current_working_dir, filename)
+
+            if not target_path or not os.path.exists(target_path):
+                # Fallback to Save As if file location is unknown
+                self._save_single_file_as(filename)
+                return
+
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(xml_str)
+            QMessageBox.information(self, "File Saved", f"Successfully saved '{filename}' to:\n{target_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save '{filename}':\n{str(e)}")
+            print(f"[Verbose Error] _save_single_file exception: {e}")
+
+    def _save_single_file_as(self, filename):
+        """Prompts user for destination path to save a single compiled XML file."""
+        if not self.canvas.root_container_instance:
+            return
+        try:
+            results = XUICompiler.generate_source(self.canvas.root_container_instance, None)
+            if filename not in results:
+                QMessageBox.warning(self, "Save Warning", f"Could not find compiled source for '{filename}'.")
+                return
+
+            xml_str, _ = results[filename]
+            start_dir = self.current_working_dir if self.current_working_dir else ""
+            default_path = os.path.join(start_dir, filename)
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, f"Save '{filename}' As...", default_path, "XML Files (*.xml);;All Files (*)"
+            )
+            if not file_path:
+                return
+
+            self.current_working_dir = os.path.dirname(file_path)
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(xml_str)
+            QMessageBox.information(self, "File Saved", f"Successfully saved to:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save As Error", f"Failed to save '{filename}':\n{str(e)}")
+            print(f"[Verbose Error] _save_single_file_as exception: {e}")
 
     def _save_all_files(self):
         if not self.canvas.root_container_instance: return

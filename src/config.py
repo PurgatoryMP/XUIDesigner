@@ -53,68 +53,94 @@ def save_config(config_data):
 CONFIG = load_config()
 
 def get_skin_path():
-    """Returns the primary active skin directory path, regardless of whether base points to root or /skins."""
-    base = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
-    skin = CONFIG.get("paths", {}).get("skin_name", "default")
+    """Returns the primary active skin directory path, safely handling root or /skins installations."""
+    try:
+        base = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
+        skin = CONFIG.get("paths", {}).get("skin_name", "default")
 
-    # Case 1: Standard root path (e.g., .../SecondLifeViewer -> .../SecondLifeViewer/skins/default)
-    skin_dir = os.path.join(base, "skins", skin)
-    if os.path.exists(skin_dir):
+        # Case 1: Standard root path (e.g., .../SecondLifeViewer -> .../SecondLifeViewer/skins/default)
+        skin_dir = os.path.join(base, "skins", skin)
+        if os.path.exists(skin_dir):
+            return skin_dir
+
+        # Case 2: User pointed directly at the 'skins' directory (e.g., .../skins -> .../skins/default)
+        direct_dir = os.path.join(base, skin)
+        if os.path.exists(direct_dir):
+            return direct_dir
+
         return skin_dir
-
-    # Case 2: User pointed directly at the 'skins' directory (e.g., .../skins -> .../skins/default)
-    direct_dir = os.path.join(base, skin)
-    if os.path.exists(direct_dir):
-        return direct_dir
-
-    return skin_dir
+    except Exception as e:
+        print(f"[Verbose Error] get_skin_path failed to resolve: {e}")
+        return "C:/Program Files/SecondLifeViewer/skins/default"
 
 
 def get_skin_paths():
     """Returns a list of skin directories in inheritance order: [default_skin_dir, active_skin_dir]."""
-    base = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
-    skin = CONFIG.get("paths", {}).get("skin_name", "default")
+    try:
+        base = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
+        skin = CONFIG.get("paths", {}).get("skin_name", "default")
 
-    paths = []
-    # 1. Resolve 'default' skin directory
-    default_dir = os.path.join(base, "skins", "default")
-    if not os.path.exists(default_dir):
-        default_alt = os.path.join(base, "default")
-        if os.path.exists(default_alt):
-            default_dir = default_alt
-    if os.path.exists(default_dir):
-        paths.append(default_dir)
+        paths = []
+        # 1. Resolve 'default' skin directory
+        default_dir = os.path.join(base, "skins", "default")
+        if not os.path.exists(default_dir):
+            default_alt = os.path.join(base, "default")
+            if os.path.exists(default_alt):
+                default_dir = default_alt
+        if os.path.exists(default_dir):
+            paths.append(default_dir)
 
-    # 2. Add active custom skin second (to override default definitions/textures)
-    if skin.lower() != "default":
-        active_dir = get_skin_path()
-        if os.path.exists(active_dir) and active_dir not in paths:
-            paths.append(active_dir)
+        # 2. Add active custom skin second (so its definitions override default in dictionaries/pixmaps)
+        if skin.lower() != "default":
+            active_dir = get_skin_path()
+            if os.path.exists(active_dir) and active_dir not in paths:
+                paths.append(active_dir)
 
-    if not paths:
-        paths.append(base)
+        if not paths:
+            paths.append(base)
 
-    return paths
+        return paths
+    except Exception as e:
+        print(f"[Verbose Error] get_skin_paths failed: {e}")
+        return [base]
 
 
 def get_textures_path():
     """Returns the active texture path."""
-    skin_dir = get_skin_path()
-    tex_dir = os.path.join(skin_dir, "textures")
-    return tex_dir if os.path.exists(tex_dir) else skin_dir
+    try:
+        skin_dir = get_skin_path()
+        tex_dir = os.path.join(skin_dir, "textures")
+        return tex_dir if os.path.exists(tex_dir) else skin_dir
+    except Exception as e:
+        print(f"[Verbose Error] get_textures_path failed: {e}")
+        return ""
 
 
 def get_textures_paths():
-    """Returns all texture directories to scan in inheritance order (default -> active)."""
-    skin_dirs = get_skin_paths()
-    tex_paths = []
-    for sdir in skin_dirs:
-        tex_dir = os.path.join(sdir, "textures")
-        if os.path.exists(tex_dir):
-            tex_paths.append(tex_dir)
-        else:
-            tex_paths.append(sdir)
-    return tex_paths
+    """Returns all texture directories to scan in inheritance order (default -> active), including subfolders."""
+    try:
+        skin_dirs = get_skin_paths()
+        tex_paths = []
+        for sdir in skin_dirs:
+            tex_dir = os.path.join(sdir, "textures")
+            if os.path.exists(tex_dir):
+                tex_paths.append(tex_dir)
+                # Recursively discover icon/window subdirectories within /textures/
+                try:
+                    for root, dirs, _ in os.walk(tex_dir):
+                        for d in dirs:
+                            sub_path = os.path.join(root, d)
+                            if sub_path not in tex_paths:
+                                tex_paths.append(sub_path)
+                except Exception as walk_err:
+                    print(f"[Verbose Error] Failed scanning texture subfolders in '{tex_dir}': {walk_err}")
+            else:
+                if sdir not in tex_paths:
+                    tex_paths.append(sdir)
+        return tex_paths
+    except Exception as e:
+        print(f"[Verbose Error] get_textures_paths failed: {e}")
+        return []
 
 
 def get_xui_path():

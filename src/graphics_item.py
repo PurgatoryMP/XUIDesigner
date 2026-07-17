@@ -615,110 +615,187 @@ class XUIGraphicsItem(QGraphicsRectItem):
         return errors, warnings
 
     def paint(self, painter, option, widget=None):
-        painter.setClipRect(option.exposedRect)
-        rect = self.rect()
+        try:
+            painter.setClipRect(option.exposedRect)
+            rect = self.rect()
 
-        # Safely resolve TextureManager instance without risking NoneType errors
-        tm = TextureManager.get()
-        get_pixmap = tm.get_pixmap if tm else lambda k: None
+            tm = TextureManager.get()
+            get_pixmap = tm.get_pixmap if tm else lambda k: None
 
-        # 1. Resolve Background / 9-Slice Button Textures across all standard SL attribute keys
-        bg_texture_key = None
-        for attr_key in ["image_unselected", "background_image", "bg_image", "bg_opaque_image", "image",
-                         "chrome_image"]:
-            val = self.attributes.get(attr_key)
-            if val and str(val).strip():
-                bg_texture_key = str(val).strip()
-                break
+            is_checkbox_or_radio = self.tag_name in ("check_box", "radio_item")
 
-        # Apply container defaults if no explicit background image is set
-        if not bg_texture_key:
+            # 1. Resolve Background / 9-Slice Textures
+            # Notice checkboxes and radio items must NOT use image_unselected as their background 9-slice!
+            bg_texture_key = None
+            bg_keys = ["background_image", "bg_image", "bg_opaque_image", "chrome_image"]
+            if not is_checkbox_or_radio:
+                bg_keys = ["image_unselected", "background_image", "bg_image", "bg_opaque_image", "image", "chrome_image"]
+
+            for attr_key in bg_keys:
+                val = self.attributes.get(attr_key)
+                if val and str(val).strip():
+                    bg_texture_key = str(val).strip()
+                    break
+
+            # Container and control fallback texture keys (inherits from custom skin if present)
+            if not bg_texture_key:
+                if self.tag_name == "floater": bg_texture_key = "floater_bg"
+                elif self.tag_name == "panel": bg_texture_key = "panel_bg"
+                elif self.tag_name == "button" and not is_checkbox_or_radio: bg_texture_key = "PushButton_Off"
+                elif self.tag_name == "combo_box": bg_texture_key = "combobox_off"
+                elif self.tag_name == "line_editor": bg_texture_key = "lineeditor_bg"
+
+            bg_pixmap = get_pixmap(bg_texture_key) if bg_texture_key else None
+
+            # --- Special Case: Floater Window ---
             if self.tag_name == "floater":
-                bg_texture_key = "floater_bg"
-            elif self.tag_name == "panel":
-                bg_texture_key = "panel_bg"
+                if bg_pixmap and not bg_pixmap.isNull():
+                    draw_9_slice(painter, bg_pixmap, rect)
+                else:
+                    painter.fillRect(rect, QColor("#222222"))
+                    painter.setPen(QPen(QColor("#555555"), 1))
+                    painter.drawRect(rect)
 
-        bg_pixmap = get_pixmap(bg_texture_key)
+                header_rect = QRectF(rect.x(), rect.y(), rect.width(), 24)
+                header_pixmap = get_pixmap("floater_header")
+                if header_pixmap and not header_pixmap.isNull():
+                    draw_9_slice(painter, header_pixmap, header_rect, 4, 4, 4, 4)
+                else:
+                    painter.fillRect(header_rect, QColor("#333333"))
 
-        # --- Special Case: Floater Window ---
-        if self.tag_name == "floater":
+                painter.setPen(QPen(QColor("#FFFFFF")))
+                title = self.attributes.get("title") or self.attributes.get("name") or "Floater"
+                painter.drawText(header_rect.adjusted(8, 0, -8, 0), Qt.AlignLeft | Qt.AlignVCenter, title)
+                self._draw_selection_box(painter, rect)
+                return
+
+            # --- Special Case: Progress Bar ---
+            elif self.tag_name == "progress_bar":
+                track_rect = QRectF(rect.x(), rect.y(), rect.width(), rect.height())
+                painter.fillRect(track_rect, QColor("#111111"))
+                painter.setPen(QPen(QColor("#444444"), 1))
+                painter.drawRect(track_rect)
+
+                try:
+                    val_str = (self.attributes.get("value") or self.attributes.get("initial_val") or
+                               self.attributes.get("val") or "0.5")
+                    progress_val = max(0.0, min(1.0, float(val_str)))
+                except ValueError:
+                    progress_val = 0.5
+
+                fill_w = max(0.0, (rect.width() - 4) * progress_val)
+                if fill_w > 0:
+                    fill_rect = QRectF(rect.x() + 2, rect.y() + 2, fill_w, rect.height() - 4)
+                    painter.fillRect(fill_rect, QColor("#1e457c"))
+                self._draw_selection_box(painter, rect)
+                return
+
+            # --- Special Case: Pure Text Label ---
+            elif self.tag_name == "text":
+                painter.setPen(QPen(QColor("#FFFFFF")))
+                txt_label = (self.attributes.get("label") or self.attributes.get("name") or
+                             getattr(self, 'inner_text', '') or "Text Label")
+                if txt_label == "unnamed": txt_label = "Text Label"
+
+                halign_str = self.attributes.get("halign", "left").lower()
+                valign_str = self.attributes.get("valign", "center").lower()
+                align_flags = Qt.TextSingleLine
+                align_flags |= Qt.AlignHCenter if halign_str == "center" else (Qt.AlignRight if halign_str == "right" else Qt.AlignLeft)
+                align_flags |= Qt.AlignTop if valign_str == "top" else (Qt.AlignBottom if valign_str == "bottom" else Qt.AlignVCenter)
+
+                painter.drawText(rect.adjusted(2, 2, -2, -2), align_flags, txt_label)
+                self._draw_selection_box(painter, rect)
+                return
+
+            # --- Special Case: Tab Container ---
+            elif self.tag_name == "tab_container":
+                self._draw_tab_container_internal(painter, rect)
+                return
+
+            # --- Standard Controls & Imported Viewer Widgets ---
+            # 1. Draw Background (9-sliced texture or fallback solid box)
             if bg_pixmap and not bg_pixmap.isNull():
-                draw_9_slice(painter, bg_pixmap, rect)
+                if self.tag_name in ("icon", "image", "avatar_icon", "view_border"):
+                    painter.drawPixmap(rect, bg_pixmap, QRectF(bg_pixmap.rect()))
+                else:
+                    draw_9_slice(painter, bg_pixmap, rect)
             else:
-                painter.fillRect(rect, QColor("#222222"))
+                painter.fillRect(rect, QColor("#3a3a3a"))
                 painter.setPen(QPen(QColor("#555555"), 1))
                 painter.drawRect(rect)
 
-            header_rect = QRectF(rect.x(), rect.y(), rect.width(), 24)
-            header_pixmap = get_pixmap("floater_header")
-            if header_pixmap and not header_pixmap.isNull():
-                draw_9_slice(painter, header_pixmap, header_rect, 4, 4, 4, 4)
+            # 2. Resolve Control Icons / Overlays (Checkboxes & Radio Items use image_unselected / image_selected here!)
+            icon_texture_key = None
+            if is_checkbox_or_radio:
+                is_checked = str(self.attributes.get("value", "")).lower() in ["true", "1", "yes"] or \
+                             str(self.attributes.get("initial_value", "")).lower() in ["true", "1", "yes"]
+                if is_checked:
+                    icon_texture_key = self.attributes.get("image_selected") or ("Checkbox_On" if self.tag_name == "check_box" else "RadioButton_On")
+                else:
+                    icon_texture_key = self.attributes.get("image_unselected") or ("Checkbox_Off" if self.tag_name == "check_box" else "RadioButton_Off")
             else:
-                painter.fillRect(header_rect, QColor("#333333"))
+                icon_texture_key = (self.attributes.get("default_icon_name") or
+                                    self.attributes.get("icon") or
+                                    self.attributes.get("image_name") or
+                                    self.attributes.get("image_overlay") or
+                                    (self.attributes.get("image") if self.tag_name in ("icon", "image") else None))
 
-            painter.setPen(QPen(QColor("#FFFFFF")))
-            title = self.attributes.get("title") or self.attributes.get("name") or "Floater"
-            painter.drawText(header_rect.adjusted(8, 0, -8, 0), Qt.AlignLeft | Qt.AlignVCenter, title)
+            if icon_texture_key:
+                icon_pixmap = get_pixmap(icon_texture_key)
+                if icon_pixmap and not icon_pixmap.isNull():
+                    iw, ih = float(icon_pixmap.width()), float(icon_pixmap.height())
+                    if is_checkbox_or_radio:
+                        box_size = min(max(12.0, ih), rect.height() - 4.0)
+                        target_rect = QRectF(rect.left() + 4.0, rect.center().y() - (box_size / 2.0), box_size, box_size)
+                    else:
+                        avail_w, avail_h = max(1.0, rect.width() - 4.0), max(1.0, rect.height() - 4.0)
+                        if (iw > avail_w or ih > avail_h or self.tag_name in ("icon", "image")) and iw > 0 and ih > 0:
+                            scale = min(avail_w / iw, avail_h / ih)
+                            target_w, target_h = iw * scale, ih * scale
+                            target_rect = QRectF(rect.center().x() - target_w / 2.0, rect.center().y() - target_h / 2.0, target_w, target_h)
+                        else:
+                            target_rect = QRectF(rect.center().x() - iw / 2.0, rect.center().y() - ih / 2.0, iw, ih)
+                    painter.drawPixmap(target_rect, icon_pixmap, QRectF(icon_pixmap.rect()))
+                elif is_checkbox_or_radio:
+                    # Clean vector fallback drawing if skin texture is missing
+                    box_size = 14.0
+                    target_rect = QRectF(rect.left() + 4.0, rect.center().y() - (box_size / 2.0), box_size, box_size)
+                    painter.save()
+                    painter.setPen(QPen(QColor("#AAAAAA"), 1.5))
+                    painter.setBrush(QBrush(QColor("#222222")))
+                    if self.tag_name == "radio_item":
+                        painter.drawEllipse(target_rect)
+                        if "on" in str(icon_texture_key).lower() or "selected" in str(icon_texture_key).lower():
+                            painter.setBrush(QBrush(QColor("#FFFFFF")))
+                            painter.drawEllipse(target_rect.adjusted(3, 3, -3, -3))
+                    else:
+                        painter.drawRect(target_rect)
+                        if "on" in str(icon_texture_key).lower() or "selected" in str(icon_texture_key).lower():
+                            painter.setPen(QPen(QColor("#FFFFFF"), 2))
+                            painter.drawLine(target_rect.left() + 3, target_rect.center().y(), target_rect.center().x(), target_rect.bottom() - 3)
+                            painter.drawLine(target_rect.center().x(), target_rect.bottom() - 3, target_rect.right() - 3, target_rect.top() + 3)
+                    painter.restore()
+
+            # 3. Draw Control Label Text
+            label_text = self.attributes.get("label") or self.attributes.get("label_selected")
+            if not label_text and self.tag_name in ("button", "check_box", "radio_item", "menu_item", "flyout_button"):
+                name_val = self.attributes.get("name", "")
+                if name_val and name_val != "unnamed": label_text = name_val
+
+            if label_text:
+                painter.setPen(QPen(QColor("#FFFFFF")))
+                if is_checkbox_or_radio:
+                    painter.drawText(rect.adjusted(22, 0, -4, 0), Qt.AlignLeft | Qt.AlignVCenter, label_text)
+                else:
+                    painter.drawText(rect.adjusted(6, 0, -6, 0), Qt.AlignCenter | Qt.AlignVCenter, label_text)
 
             self._draw_selection_box(painter, rect)
-            return
+        except Exception as e:
+            print(f"[Verbose Error] XUIGraphicsItem.paint failed on <{self.tag_name}>: {e}")
 
-        # --- Special Case: Progress Bar ---
-        elif self.tag_name == "progress_bar":
-            track_rect = QRectF(rect.x(), rect.y(), rect.width(), rect.height())
-            painter.fillRect(track_rect, QColor("#111111"))
-            painter.setPen(QPen(QColor("#444444"), 1))
-            painter.drawRect(track_rect)
-
-            try:
-                val_str = (self.attributes.get("value") or
-                           self.attributes.get("initial_val") or
-                           self.attributes.get("val") or "0.5")
-                progress_val = max(0.0, min(1.0, float(val_str)))
-            except ValueError:
-                progress_val = 0.5
-
-            fill_w = max(0.0, (rect.width() - 4) * progress_val)
-            if fill_w > 0:
-                fill_rect = QRectF(rect.x() + 2, rect.y() + 2, fill_w, rect.height() - 4)
-                painter.fillRect(fill_rect, QColor("#1e457c"))
-
-            self._draw_selection_box(painter, rect)
-            return
-
-        # --- Special Case: Pure Text Label ---
-        elif self.tag_name == "text":
-            painter.setPen(QPen(QColor("#FFFFFF")))
-            txt_label = (self.attributes.get("label") or
-                         self.attributes.get("name") or
-                         getattr(self, 'inner_text', '') or "Text Label")
-            if txt_label == "unnamed":
-                txt_label = "Text Label"
-
-            halign_str = self.attributes.get("halign", "left").lower()
-            valign_str = self.attributes.get("valign", "center").lower()
-
-            align_flags = Qt.TextSingleLine
-            if halign_str == "center":
-                align_flags |= Qt.AlignHCenter
-            elif halign_str == "right":
-                align_flags |= Qt.AlignRight
-            else:
-                align_flags |= Qt.AlignLeft
-
-            if valign_str == "top":
-                align_flags |= Qt.AlignTop
-            elif valign_str == "bottom":
-                align_flags |= Qt.AlignBottom
-            else:
-                align_flags |= Qt.AlignVCenter
-
-            painter.drawText(rect.adjusted(2, 2, -2, -2), align_flags, txt_label)
-            self._draw_selection_box(painter, rect)
-            return
-
-        # --- Special Case: Tab Container ---
-        elif self.tag_name == "tab_container":
+    def _draw_tab_container_internal(self, painter, rect):
+        """Helper method extracted to keep tab rendering clean and exception-safe."""
+        try:
             painter.fillRect(rect, QColor("#1e1e1e"))
             painter.setPen(QPen(QColor("#555555"), 1))
             painter.drawRect(rect)
@@ -726,8 +803,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
             tab_pos_side = self.attributes.get("tab_position", "top").lower()
             tab_height = int(self.attributes.get("tab_height", 21))
             tab_width_attr = int(self.attributes.get("tab_width", 80))
-            min_w = int(self.attributes.get("tab_min_width", 60))
-            max_w = int(self.attributes.get("tab_max_width", 150))
+            min_w, max_w = int(self.attributes.get("tab_min_width", 60)), int(self.attributes.get("tab_max_width", 150))
 
             actual_panels = [c for c in getattr(self, 'child_xui_items', []) if c.tag_name in ["panel", "layout_panel"]]
             self._tab_header_rects = []
@@ -741,12 +817,10 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 divider_line = QLineF(rect.left(), rect.bottom() - tab_height, rect.right(), rect.bottom() - tab_height)
             elif tab_pos_side == "left":
                 header_rect = QRectF(rect.x(), rect.y(), tab_width_attr, rect.height())
-                divider_line = QLineF(rect.left() + tab_width_attr, rect.top(), rect.left() + tab_width_attr,
-                                      rect.bottom())
+                divider_line = QLineF(rect.left() + tab_width_attr, rect.top(), rect.left() + tab_width_attr, rect.bottom())
             elif tab_pos_side == "right":
                 header_rect = QRectF(rect.right() - tab_width_attr, rect.y(), tab_width_attr, rect.height())
-                divider_line = QLineF(rect.right() - tab_width_attr, rect.top(), rect.right() - tab_width_attr,
-                                      rect.bottom())
+                divider_line = QLineF(rect.right() - tab_width_attr, rect.top(), rect.right() - tab_width_attr, rect.bottom())
             else:
                 header_rect = QRectF(rect.x(), rect.y(), rect.width(), tab_height)
                 divider_line = QLineF(rect.left(), rect.top() + tab_height, rect.right(), rect.top() + tab_height)
@@ -756,14 +830,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
             offset = 2
             for i, tab_panel in enumerate(actual_panels):
-                tab_label = tab_panel.attributes.get("label", tab_panel.attributes.get("title",
-                                                                                       tab_panel.attributes.get("name",
-                                                                                                                "Unnamed Tab")))
+                tab_label = tab_panel.attributes.get("label", tab_panel.attributes.get("title", tab_panel.attributes.get("name", "Unnamed Tab")))
                 is_active = (i == getattr(self, 'active_tab_index', 0))
 
                 if tab_pos_side in ["top", "bottom"]:
-                    extra_w = 20 if is_active else 0
-                    calc_size = max(min_w, min(max_w, len(tab_label) * 7 + 20)) + extra_w
+                    calc_size = max(min_w, min(max_w, len(tab_label) * 7 + 20)) + (20 if is_active else 0)
                     tab_rect = QRectF(rect.x() + offset, header_rect.y(), calc_size, tab_height)
                 else:
                     calc_size = max(20, tab_height + (6 if is_active else 0))
@@ -774,14 +845,10 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 if is_active:
                     painter.fillRect(tab_rect, QColor("#2b2b2b"))
                     painter.setPen(QPen(QColor("#1e457c"), 2))
-                    if tab_pos_side == "top":
-                        painter.drawLine(tab_rect.left(), tab_rect.bottom(), tab_rect.right(), tab_rect.bottom())
-                    elif tab_pos_side == "bottom":
-                        painter.drawLine(tab_rect.left(), tab_rect.top(), tab_rect.right(), tab_rect.top())
-                    elif tab_pos_side == "left":
-                        painter.drawLine(tab_rect.right(), tab_rect.top(), tab_rect.right(), tab_rect.bottom())
-                    elif tab_pos_side == "right":
-                        painter.drawLine(tab_rect.left(), tab_rect.top(), tab_rect.left(), tab_rect.bottom())
+                    if tab_pos_side == "top": painter.drawLine(tab_rect.left(), tab_rect.bottom(), tab_rect.right(), tab_rect.bottom())
+                    elif tab_pos_side == "bottom": painter.drawLine(tab_rect.left(), tab_rect.top(), tab_rect.right(), tab_rect.top())
+                    elif tab_pos_side == "left": painter.drawLine(tab_rect.right(), tab_rect.top(), tab_rect.right(), tab_rect.bottom())
+                    elif tab_pos_side == "right": painter.drawLine(tab_rect.left(), tab_rect.top(), tab_rect.left(), tab_rect.bottom())
                     painter.setPen(QPen(QColor("#FFFFFF")))
                 else:
                     painter.fillRect(tab_rect, QColor("#222222"))
@@ -800,77 +867,9 @@ class XUIGraphicsItem(QGraphicsRectItem):
             painter.setPen(QPen(QColor("#AAAAAA")))
             painter.drawRect(self._plus_btn_rect)
             painter.drawText(self._plus_btn_rect, Qt.AlignCenter, "+")
-
             self._draw_selection_box(painter, rect)
-            return
-
-        # --- Standard Controls & Imported Viewer Widgets ---
-        # 1. Draw Background (9-sliced texture or fallback solid box)
-        if bg_pixmap and not bg_pixmap.isNull():
-            if self.tag_name in ("icon", "image", "avatar_icon", "view_border"):
-                painter.drawPixmap(rect, bg_pixmap, QRectF(bg_pixmap.rect()))
-            else:
-                draw_9_slice(painter, bg_pixmap, rect)
-        else:
-            painter.fillRect(rect, QColor("#3a3a3a"))
-            painter.setPen(QPen(QColor("#555555"), 1))
-            painter.drawRect(rect)
-
-        # 2. Resolve Control Icons / Overlays
-        icon_texture_key = (self.attributes.get("default_icon_name") or
-                            self.attributes.get("icon") or
-                            self.attributes.get("image_name") or
-                            self.attributes.get("image_overlay") or
-                            (self.attributes.get("image") if self.tag_name in ("icon", "image") else None))
-
-        is_checkbox_or_radio = self.tag_name in ("check_box", "radio_item")
-
-        if icon_texture_key:
-            icon_pixmap = get_pixmap(icon_texture_key)
-            if icon_pixmap and not icon_pixmap.isNull():
-                iw, ih = float(icon_pixmap.width()), float(icon_pixmap.height())
-
-                if is_checkbox_or_radio:
-                    box_size = min(max(12.0, ih), rect.height() - 4.0)
-                    target_rect = QRectF(rect.left() + 4.0, rect.center().y() - (box_size / 2.0), box_size, box_size)
-                else:
-                    avail_w = max(1.0, rect.width() - 4.0)
-                    avail_h = max(1.0, rect.height() - 4.0)
-
-                    if (iw > avail_w or ih > avail_h or self.tag_name in ("icon", "image")) and iw > 0 and ih > 0:
-                        scale = min(avail_w / iw, avail_h / ih)
-                        target_w = iw * scale
-                        target_h = ih * scale
-                        target_rect = QRectF(
-                            rect.center().x() - target_w / 2.0,
-                            rect.center().y() - target_h / 2.0,
-                            target_w, target_h
-                        )
-                    else:
-                        target_rect = QRectF(
-                            rect.center().x() - iw / 2.0,
-                            rect.center().y() - ih / 2.0,
-                            iw, ih
-                        )
-                painter.drawPixmap(target_rect, icon_pixmap, QRectF(icon_pixmap.rect()))
-
-        # 3. Draw Control Text / Label (if applicable)
-        label_text = self.attributes.get("label") or self.attributes.get("label_selected")
-        if not label_text and self.tag_name in ("button", "check_box", "radio_item", "menu_item", "flyout_button"):
-            name_val = self.attributes.get("name", "")
-            if name_val and name_val != "unnamed":
-                label_text = name_val
-
-        if label_text:
-            painter.setPen(QPen(QColor("#FFFFFF")))
-            if is_checkbox_or_radio:
-                text_rect = rect.adjusted(22, 0, -4, 0)
-                painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, label_text)
-            else:
-                text_rect = rect.adjusted(6, 0, -6, 0)
-                painter.drawText(text_rect, Qt.AlignCenter | Qt.AlignVCenter, label_text)
-
-        self._draw_selection_box(painter, rect)
+        except Exception as e:
+            print(f"[Verbose Error] _draw_tab_container_internal failed: {e}")
 
     def _draw_selection_box(self, painter, rect):
         """Helper to draw the green dashed selection bounding box and 8-way resize handles."""

@@ -181,3 +181,6 @@ cython_debug/
 .cursorindexingignore
 src/combined_widgets_context.xml
 src/config.json
+src/secondlife viewer skins directory.txt
+src/skins.xml
+src/firestorm viewer skins directory.txt
