@@ -180,3 +180,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 src/combined_widgets_context.xml
+src/config.json
