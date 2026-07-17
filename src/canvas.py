@@ -13,6 +13,8 @@ class CanvasContainer(QGraphicsView):
         self.scene = QGraphicsScene(0, 0, 1200, 900, self)
         self.scene.canvas_container = self
         self.setScene(self.scene)
+        self.grid_snapping_enabled = True
+        self.grid_size = 10
 
         self.root_container_instance = None
         self.setAcceptDrops(True)
@@ -25,7 +27,10 @@ class CanvasContainer(QGraphicsView):
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
-        grid_size = 10
+        grid_size = getattr(self, 'grid_size', 10)
+        if grid_size <= 0:
+            return
+
         left = int(rect.left()) - (int(rect.left()) % grid_size)
         top = int(rect.top()) - (int(rect.top()) % grid_size)
 
@@ -110,6 +115,10 @@ class CanvasContainer(QGraphicsView):
         # Determine what is under the cursor (the parent container, if any)
         parent_item = self.scene.itemAt(scene_pos, self.transform())
 
+        # Fetch dynamic grid settings once at the top
+        grid_size = getattr(self, 'grid_size', 10)
+        snapping_enabled = getattr(self, 'grid_snapping_enabled', True)
+
         if isinstance(parent_item, XUIGraphicsItem):
             # --- TAB CONTAINER DROP REDIRECTION ---
             if parent_item.tag_name == "tab_container" and tag_name not in ["panel", "layout_panel"]:
@@ -132,9 +141,13 @@ class CanvasContainer(QGraphicsView):
             # Convert absolute scene mouse position to the parent's local coordinate space
             local_pos = parent_item.mapFromScene(scene_pos)
 
-            # Snap to parent's internal 10x10 grid without drifting
-            local_x = max(0.0, round(local_pos.x() / 10.0) * 10.0)
-            local_y = max(0.0, round(local_pos.y() / 10.0) * 10.0)
+            # Snap using local_pos so items align properly inside containers
+            if snapping_enabled and grid_size > 0:
+                local_x = max(0.0, round(local_pos.x() / grid_size) * grid_size)
+                local_y = max(0.0, round(local_pos.y() / grid_size) * grid_size)
+            else:
+                local_x = max(0.0, local_pos.x())
+                local_y = max(0.0, local_pos.y())
 
             # Create the item directly at the newly mapped local coordinates
             new_item = XUIGraphicsItem(tag_name, {"left": str(int(local_x)), "top": str(int(local_y))})
@@ -145,9 +158,13 @@ class CanvasContainer(QGraphicsView):
             new_item.sync_attributes_to_geometry()
 
         else:
-            # Dropping on the main canvas (root container)
-            x = max(20.0, round(scene_pos.x() / 10.0) * 10.0)
-            y = max(20.0, round(scene_pos.y() / 10.0) * 10.0)
+            # Apply dynamic slider grid and toggle to root canvas drops
+            if snapping_enabled and grid_size > 0:
+                x = max(20.0, round(scene_pos.x() / grid_size) * grid_size)
+                y = max(20.0, round(scene_pos.y() / grid_size) * grid_size)
+            else:
+                x = max(20.0, scene_pos.x())
+                y = max(20.0, scene_pos.y())
 
             new_item = XUIGraphicsItem(tag_name, {"left": str(int(x)), "top": str(int(y))})
             new_item.setPos(x, y)

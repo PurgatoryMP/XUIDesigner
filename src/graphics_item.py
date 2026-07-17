@@ -69,6 +69,62 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
         self.sync_geometry_to_attributes()
 
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self.scene():
+            canvas = getattr(self.scene(), 'canvas_container', None) or self.scene()
+            snapping_enabled = getattr(canvas, 'grid_snapping_enabled', True)
+            grid_size = getattr(canvas, 'grid_size', 10)
+
+            new_pos = value
+            # Respect toggle and use dynamic slider grid size
+            if snapping_enabled and grid_size > 0:
+                snapped_x = round(new_pos.x() / grid_size) * grid_size
+                snapped_y = round(new_pos.y() / grid_size) * grid_size
+            else:
+                snapped_x = new_pos.x()
+                snapped_y = new_pos.y()
+
+            parent = self.parentItem()
+            idx = parent.child_xui_items.index(self) if isinstance(parent, XUIGraphicsItem) and self in parent.child_xui_items else -1
+            prev_sib = parent.child_xui_items[idx - 1] if idx > 0 else None
+
+            if "right" in self.attributes:
+                parent_w = parent.rect().width() if isinstance(parent, XUIGraphicsItem) else 500
+                try:
+                    if int(self.attributes["right"]) <= 0:
+                        self.attributes["right"] = str(int((snapped_x + self.rect().width()) - parent_w))
+                    else:
+                        self.attributes["right"] = str(int(snapped_x + self.rect().width()))
+                except ValueError:
+                    self.attributes["right"] = str(int(snapped_x + self.rect().width()))
+            elif "left_delta" in self.attributes and prev_sib:
+                self.attributes["left_delta"] = str(int(snapped_x - prev_sib.x()))
+            elif "left_pad" in self.attributes and prev_sib:
+                self.attributes["left_pad"] = str(int(snapped_x - (prev_sib.x() + prev_sib.rect().width())))
+            else:
+                self.attributes["left"] = str(int(snapped_x))
+
+            if "bottom" in self.attributes:
+                parent_h = parent.rect().height() if isinstance(parent, XUIGraphicsItem) else 500
+                try:
+                    if int(self.attributes["bottom"]) <= 0:
+                        self.attributes["bottom"] = str(int((snapped_y + self.rect().height()) - parent_h))
+                    else:
+                        self.attributes["bottom"] = str(int(snapped_y + self.rect().height()))
+                except ValueError:
+                    self.attributes["bottom"] = str(int(snapped_y + self.rect().height()))
+            elif "top_delta" in self.attributes and prev_sib:
+                self.attributes["top_delta"] = str(int(snapped_y - prev_sib.y()))
+            elif "top_pad" in self.attributes and prev_sib:
+                self.attributes["top_pad"] = str(int(snapped_y - (prev_sib.y() + prev_sib.rect().height())))
+            else:
+                self.attributes["top"] = str(int(snapped_y))
+
+            if hasattr(self.scene(), 'canvas_container') and self.scene().canvas_container:
+                self.scene().canvas_container.item_modified_signal.emit(self)
+            return QPointF(snapped_x, snapped_y)
+        return super().itemChange(change, value)
+
     def _draw_tab_container(self, painter, rect):
         """Draws the tab container background and tab header buttons."""
         # Draw main container body
@@ -503,6 +559,16 @@ class XUIGraphicsItem(QGraphicsRectItem):
 
             new_x, new_y = cur_pos.x(), cur_pos.y()
             new_w, new_h = cur_rect.width(), cur_rect.height()
+            canvas = getattr(self.scene(), 'canvas_container', None) or self.scene()
+            snapping_enabled = getattr(canvas, 'grid_snapping_enabled', True)
+            grid_size = getattr(canvas, 'grid_size', 10)
+
+            if snapping_enabled and grid_size > 0:
+                snapped_x = round(parent_pos.x() / grid_size) * grid_size
+                snapped_y = round(parent_pos.y() / grid_size) * grid_size
+            else:
+                snapped_x = parent_pos.x()
+                snapped_y = parent_pos.y()
 
             if "L" in self.resize_dir:
                 diff = snapped_x - cur_pos.x()
@@ -542,54 +608,6 @@ class XUIGraphicsItem(QGraphicsRectItem):
             if hasattr(self.scene(), 'canvas_container'):
                 self.scene().canvas_container.item_modified_signal.emit(self)
         super().mouseReleaseEvent(event)
-
-    def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionChange and self.scene():
-            new_pos = value
-            snapped_x = round(new_pos.x() / 10.0) * 10.0
-            snapped_y = round(new_pos.y() / 10.0) * 10.0
-
-            parent = self.parentItem()
-            idx = parent.child_xui_items.index(self) if isinstance(parent,
-                                                                   XUIGraphicsItem) and self in parent.child_xui_items else -1
-            prev_sib = parent.child_xui_items[idx - 1] if idx > 0 else None
-
-            if "right" in self.attributes:
-                parent_w = parent.rect().width() if isinstance(parent, XUIGraphicsItem) else 500
-                try:
-                    if int(self.attributes["right"]) <= 0:
-                        self.attributes["right"] = str(int((snapped_x + self.rect().width()) - parent_w))
-                    else:
-                        self.attributes["right"] = str(int(snapped_x + self.rect().width()))
-                except ValueError:
-                    self.attributes["right"] = str(int(snapped_x + self.rect().width()))
-            elif "left_delta" in self.attributes and prev_sib:
-                self.attributes["left_delta"] = str(int(snapped_x - prev_sib.x()))
-            elif "left_pad" in self.attributes and prev_sib:
-                self.attributes["left_pad"] = str(int(snapped_x - (prev_sib.x() + prev_sib.rect().width())))
-            else:
-                self.attributes["left"] = str(int(snapped_x))
-
-            if "bottom" in self.attributes:
-                parent_h = parent.rect().height() if isinstance(parent, XUIGraphicsItem) else 500
-                try:
-                    if int(self.attributes["bottom"]) <= 0:
-                        self.attributes["bottom"] = str(int((snapped_y + self.rect().height()) - parent_h))
-                    else:
-                        self.attributes["bottom"] = str(int(snapped_y + self.rect().height()))
-                except ValueError:
-                    self.attributes["bottom"] = str(int(snapped_y + self.rect().height()))
-            elif "top_delta" in self.attributes and prev_sib:
-                self.attributes["top_delta"] = str(int(snapped_y - prev_sib.y()))
-            elif "top_pad" in self.attributes and prev_sib:
-                self.attributes["top_pad"] = str(int(snapped_y - (prev_sib.y() + prev_sib.rect().height())))
-            else:
-                self.attributes["top"] = str(int(snapped_y))
-
-            if hasattr(self.scene(), 'canvas_container') and self.scene().canvas_container:
-                self.scene().canvas_container.item_modified_signal.emit(self)
-            return QPointF(snapped_x, snapped_y)
-        return super().itemChange(change, value)
 
     def validate(self):
         errors, warnings = [], []

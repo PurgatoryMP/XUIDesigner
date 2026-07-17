@@ -8,7 +8,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
     QTextEdit, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QTabWidget, QApplication, QMenu
+    QLineEdit, QPushButton, QTabWidget, QApplication, QMenu, QSlider, QSizePolicy, QToolBar
 )
 from registry import XUI_REGISTRY
 from textures import TextureManager
@@ -48,7 +48,7 @@ class WidgetPaletteTree(QTreeWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Second Life XUI Designer - Professional Edition")
+        self.setWindowTitle("Second Life XUI Designer")
         self.resize(1600, 950)
 
         self.current_selected_item = None
@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_splitter)
         self.inspector = PropertyInspector()
 
+        # --- 1. LEFT PANEL: WIDGET PALETTE ---
         palette_tree = WidgetPaletteTree()
         for cat_name, widgets in XUI_REGISTRY.items():
             cat_item = QTreeWidgetItem(palette_tree, [cat_name])
@@ -108,11 +109,69 @@ class MainWindow(QMainWindow):
         palette_tree.expandAll()
         main_splitter.addWidget(palette_tree)
 
+        # --- 2. CENTER PANEL: CANVAS & CODE VIEW ---
         center_splitter = QSplitter(Qt.Vertical)
+
+        # Create a dedicated container widget so the toolbar sits INSIDE the canvas window above the ruler
+        canvas_container_widget = QWidget()
+        canvas_layout = QVBoxLayout(canvas_container_widget)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.setSpacing(0)
+
+        # Instantiate standalone QToolBar instead of using self.addToolBar()
+        self.top_toolbar = QToolBar("Canvas Actions")
+        self.top_toolbar.setMovable(False)
+        self.top_toolbar.setStyleSheet(
+            "QToolBar { background: #222222; border-bottom: 1px solid #444444; padding: 4px; }"
+        )
+
+        # Expanding spacer pushes tools to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.top_toolbar.addWidget(spacer)
+
+        # Grid Size Label & Horizontal Slider
+        self.grid_size_label = QLabel("Grid: 10px  ")
+        self.grid_size_label.setStyleSheet("color: #CCCCCC; font-weight: bold;")
+        self.top_toolbar.addWidget(self.grid_size_label)
+
+        self.grid_slider = QSlider(Qt.Horizontal)
+        self.grid_slider.setRange(2, 50)
+        self.grid_slider.setValue(10)
+        self.grid_slider.setFixedWidth(120)
+        self.grid_slider.setToolTip("Adjust Grid Snap Size (2px - 50px)")
+        self.grid_slider.setStyleSheet(
+            "QSlider::handle:horizontal { background: #1e457c; width: 14px; margin: -4px 0; border-radius: 7px; }"
+        )
+        self.grid_slider.valueChanged.connect(self._on_grid_size_changed)
+        self.top_toolbar.addWidget(self.grid_slider)
+
+        spacer_small = QWidget()
+        spacer_small.setFixedWidth(15)
+        self.top_toolbar.addWidget(spacer_small)
+
+        # Snap Toggle Button
+        self.snap_grid_btn = QPushButton("🧲 Snap: ON")
+        self.snap_grid_btn.setCheckable(True)
+        self.snap_grid_btn.setChecked(True)
+        self.snap_grid_btn.setToolTip("Toggle Grid Snapping")
+        self.snap_grid_btn.setCursor(Qt.PointingHandCursor)
+        self.snap_grid_btn.setStyleSheet(
+            "background-color: #1e457c; color: white; padding: 5px 12px; border-radius: 3px; font-weight: bold;"
+        )
+        self.snap_grid_btn.toggled.connect(self._on_toggle_grid_snapping)
+        self.top_toolbar.addWidget(self.snap_grid_btn)
+
+        # Add toolbar and canvas to the vertical container
+        canvas_layout.addWidget(self.top_toolbar)
+
         self.canvas = CanvasContainer()
         self.canvas.setBackgroundBrush(QBrush(QColor(CONFIG["ui_colors"]["canvas_bg"])))
-        center_splitter.addWidget(self.canvas)
+        canvas_layout.addWidget(self.canvas)
 
+        center_splitter.addWidget(canvas_container_widget)
+
+        # --- CODE CONTAINER ---
         code_container = QWidget()
         code_layout = QVBoxLayout(code_container)
         code_layout.setContentsMargins(0, 0, 0, 0)
@@ -121,8 +180,9 @@ class MainWindow(QMainWindow):
         xml_header_layout.addWidget(QLabel("<b>Live Second Life XML Source:</b>"))
         xml_header_layout.addStretch()
 
+        # FIXED: Instantiate the missing xml_search_input before adding search buttons
         self.xml_search_input = QLineEdit()
-        self.xml_search_input.setPlaceholderText("Find in active tab...")
+        self.xml_search_input.setPlaceholderText("Find in XML...")
         self.xml_search_input.setFixedWidth(150)
         self.xml_search_input.textChanged.connect(self._on_xml_search_changed)
         xml_header_layout.addWidget(self.xml_search_input)
@@ -140,14 +200,11 @@ class MainWindow(QMainWindow):
         self.code_tabs.customContextMenuRequested.connect(self._on_code_tabs_context_menu)
         code_layout.addWidget(self.code_tabs)
 
-        self.inspector.external_file_import_needed.connect(
-            self._import_external_file_to_item
-        )
-
         center_splitter.addWidget(code_container)
         center_splitter.setSizes([650, 300])
         main_splitter.addWidget(center_splitter)
 
+        # --- 3. RIGHT PANEL: DOM TREE & INSPECTOR ---
         right_splitter = QSplitter(Qt.Vertical)
         tree_container = QWidget()
         tree_layout = QVBoxLayout(tree_container)
@@ -194,17 +251,28 @@ class MainWindow(QMainWindow):
         self.inspector.property_changed_signal.connect(self._queue_refresh)
         self.scene_tree.tree_refreshed.connect(self._reapply_tree_search)
         self.inspector.external_file_import_needed.connect(self._import_external_file_to_item)
-        if self.canvas:
-            self.canvas.item_selected_signal.connect(self._on_item_selected)
-            self.canvas.item_modified_signal.connect(self._on_canvas_item_modified)
 
-        if self.inspector:
-            self.inspector.property_changed_signal.connect(self._queue_refresh)
-            self.inspector.external_file_import_needed.connect(self._import_external_file_to_item)
+    def _on_toggle_grid_snapping(self, checked):
+        """Toggles canvas grid snapping on/off and updates button styling."""
+        if hasattr(self, 'canvas') and self.canvas:
+            self.canvas.grid_snapping_enabled = checked
 
-        if self.scene_tree:
-            self.scene_tree.tree_refreshed.connect(self._reapply_tree_search)
+            # Update button visual styling and label to clearly show state
+            if checked:
+                self.snap_grid_btn.setText("🧲 Snap: ON")
+                self.snap_grid_btn.setStyleSheet(
+                    "background-color: #1e457c; color: white; padding: 5px 10px; border-radius: 3px; font-weight: bold;")
+            else:
+                self.snap_grid_btn.setText("🧲 Snap: OFF")
+                self.snap_grid_btn.setStyleSheet(
+                    "background-color: #333333; color: #AAAAAA; padding: 5px 10px; border-radius: 3px;")
 
+    def _on_grid_size_changed(self, value):
+        """Updates grid size on the canvas and triggers a repaint of grid lines."""
+        self.grid_size_label.setText(f"Grid: {value}px  ")
+        if hasattr(self, 'canvas') and self.canvas:
+            self.canvas.grid_size = value
+            self.canvas.scene.update()  # Redraws canvas background grid instantly
 
     def apply_live_preferences(self):
         """Push preference changes live across the entire application hierarchy."""

@@ -8,7 +8,8 @@ By bridging the gap between raw XML coding and in-viewer testing, the designer r
 
 ---
 
-![XUIDesigner](screenshots/screenshot0.PNG)
+![XUIDesigner](screenshots/MainWindow.PNG)
+![XUIDesigner](screenshots/Preferences.PNG)
 
 ---
 
