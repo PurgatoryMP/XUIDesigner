@@ -1,3 +1,10 @@
+"""
+This module provides the XUIGraphicsItem class, a specialized QGraphicsRectItem
+responsible for rendering Second Life Viewer UI controls on the editor canvas.
+It handles 9-slice background scaling, dynamic grid snapping, layout resizing
+using 'follows' rules, and specialized rendering for container widgets like
+floaters, tab containers, and layout stacks.
+"""
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QCursor, QFont
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem
@@ -6,7 +13,34 @@ from textures import TextureManager, draw_9_slice
 
 
 class XUIGraphicsItem(QGraphicsRectItem):
+    """A visual canvas item representing a single XML node in the XUI hierarchy.
+
+        Manages bidirectional synchronization between visual canvas geometry and DOM
+        attribute dictionaries. Supports interactive moving, 8-way handle resizing,
+        and automatic layout adjustments for child components.
+
+        Attributes:
+            tag_name (str): The XML tag name of the widget (e.g., 'button', 'floater').
+            attributes (dict): Key-value pairs representing the XML node's attributes.
+            source_file (str): The filename where this XML node originated.
+            is_imported_root (bool): True if this item represents the root of an included XML file.
+            active_tab_index (int): The currently active tab index if this is a tab container.
+            child_xui_items (list[XUIGraphicsItem]): Visual child components nested inside this item.
+            non_visual_children (list[dict]): Non-visual XML children (e.g., event bindings, timers).
+            inner_text (str): Text content located between opening and closing XML tags.
+            resize_handle_size (int): The pixel size of interactive selection corner handles.
+            resizing (bool): Flag indicating if the item is currently being resized by the user.
+            resize_dir (str | None): The active resize handle direction (e.g., 'TL', 'BR').
+        """
+
     def __init__(self, tag_name, attributes=None, parent_item=None):
+        """Initializes the graphics item, inheriting schema defaults and configuring flags.
+
+                Args:
+                    tag_name: The XUI XML tag identifier for the widget type.
+                    attributes: Optional initial dictionary of XML attributes.
+                    parent_item: The parent QGraphicsItem, if nested inside another container.
+                """
         super().__init__(parent_item)
         self.tag_name = tag_name
         self.attributes = attributes or {}
@@ -70,6 +104,19 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.sync_geometry_to_attributes()
 
     def itemChange(self, change, value):
+        """Intercepts Qt item state changes to handle grid snapping and XML coordinate updates.
+
+                When moved, this method snaps coordinates to the canvas grid and recalculates
+                positional XML attributes ('left', 'top', 'right', 'bottom', or relative delta/pad
+                attributes) based on parent boundaries and sibling offsets.
+
+                Args:
+                    change: The specific Qt change flag being applied (e.g., ItemPositionChange).
+                    value: The new value proposed for the property change.
+
+                Returns:
+                    The adjusted property value (e.g., the grid-snapped QPointF position).
+                """
         if change == QGraphicsItem.ItemPositionChange and self.scene():
             canvas = getattr(self.scene(), 'canvas_container', None) or self.scene()
             snapping_enabled = getattr(canvas, 'grid_snapping_enabled', True)
@@ -126,7 +173,12 @@ class XUIGraphicsItem(QGraphicsRectItem):
         return super().itemChange(change, value)
 
     def _draw_tab_container(self, painter, rect):
-        """Draws the tab container background and tab header buttons."""
+        """Renders the standard tab container background and top header buttons.
+
+                Args:
+                    painter: The active QPainter instance used for drawing.
+                    rect: The bounding rectangle of the tab container.
+                """
         # Draw main container body
         painter.fillRect(rect, QColor("#222222"))
         painter.setPen(QPen(QColor("#555555"), 1))
@@ -170,7 +222,7 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.update_tab_visibility()
 
     def update_tab_visibility(self):
-        """Hides inactive tab panels and shows the active one."""
+        """Updates child panel visibility, showing only the currently active tab panel."""
         tabs = [child for child in getattr(self, 'child_xui_items', []) if isinstance(child, XUIGraphicsItem)]
         for i, tab_item in enumerate(tabs):
             is_active = (i == self.active_tab_index)
@@ -178,12 +230,13 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 tab_item.setVisible(is_active)
 
     def update_z_orders(self):
-        """Ensures Qt Canvas Z-ordering strictly mirrors the DOM hierarchy array index."""
+        """Synchronizes Qt canvas Z-stacking order to strictly mirror DOM child array indexing."""
         for idx, child in enumerate(self.child_xui_items):
             child.setZValue(float(idx + 1))
             child.update_z_orders()
 
     def sync_geometry_to_attributes(self):
+        """Updates the Qt bounding rectangle to match the XML width and height attributes."""
         try:
             w = float(self.attributes.get("width", 100))
             h = float(self.attributes.get("height", 20))
@@ -192,6 +245,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
             self.setRect(0, 0, 100, 20)
 
     def sync_attributes_to_geometry(self):
+        """Recalculates and stores XML dimensional attributes based on current canvas geometry.
+
+                Updates width, height, left, top, right, and bottom attributes while respecting
+                relative positioning flags and parent container dimensions.
+                """
         rect = self.rect()
         pos = self.pos()
         self.attributes["width"] = str(int(rect.width()))
@@ -224,6 +282,15 @@ class XUIGraphicsItem(QGraphicsRectItem):
             self.attributes["top"] = str(int(pos.y()))
 
     def resize_item(self, new_w, new_h):
+        """Resizes the item and repositions child widgets according to their 'follows' rules.
+
+                Parses child 'follows' flags (left, right, top, bottom, all) to proportionally
+                move or resize nested elements as the parent container scales.
+
+                Args:
+                    new_w: The new width in pixels.
+                    new_h: The new height in pixels.
+                """
         old_w = self.rect().width()
         old_h = self.rect().height()
         dw = new_w - old_w
@@ -270,10 +337,12 @@ class XUIGraphicsItem(QGraphicsRectItem):
                 if child_dw != 0 or child_dh != 0:
                     child.resize_item(cw + child_dw, ch + child_dh)
 
-    # ------------------------------------------------------------------------
-    # SMART CONTAINER MANAGERS
-    # ------------------------------------------------------------------------
     def update_tabs(self):
+        """Recalculates layouts and panel boundaries for tab container controls.
+
+                Adjusts child panel geometry based on the configured 'tab_position' side
+                (top, bottom, left, right) and header height/width attributes.
+                """
         if self.tag_name != "tab_container":
             return
 
@@ -323,6 +392,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.update_z_orders()
 
     def update_layout_stack(self):
+        """Arranges child layout panels sequentially within a layout stack container.
+
+                Positions child panels linearly along the horizontal or vertical axis, applying
+                configured padding and border size offsets.
+                """
         if self.tag_name != "layout_stack": return
 
         orientation = self.attributes.get("orientation", "vertical")
@@ -353,6 +427,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.update_z_orders()
 
     def add_child_item(self, child_item):
+        """Appends a child item to this container and triggers layout recalculations.
+
+                Args:
+                    child_item: The XUIGraphicsItem instance to nest inside this item.
+                """
         if child_item not in self.child_xui_items:
             self.child_xui_items.append(child_item)
             child_item.setParentItem(self)
@@ -363,6 +442,12 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.update_z_orders()
 
     def insert_child_item(self, index, child_item):
+        """Inserts a child item at a specific DOM index and triggers layout updates.
+
+                Args:
+                    index: The zero-based list index where the child should be inserted.
+                    child_item: The XUIGraphicsItem instance to insert.
+                """
         if child_item in self.child_xui_items:
             self.child_xui_items.remove(child_item)
         index = max(0, min(index, len(self.child_xui_items)))
@@ -375,6 +460,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.update_z_orders()
 
     def remove_child_item(self, child_item):
+        """Removes a child item from this container and updates internal Z-ordering.
+
+                Args:
+                    child_item: The XUIGraphicsItem instance to detach.
+                """
         if child_item in self.child_xui_items:
             self.child_xui_items.remove(child_item)
             child_item.setParentItem(None)
@@ -385,12 +475,28 @@ class XUIGraphicsItem(QGraphicsRectItem):
         self.update_z_orders()
 
     def _get_delete_rect(self):
+        """Calculates the bounding rectangle for the top-right selection delete ('X') button.
+
+                Returns:
+                    A QRectF defining the hit-test area for the delete button.
+                """
         return QRectF(self.rect().width() - 10, -10, 18, 18)
 
     def boundingRect(self):
+        """Returns the outer drawing boundary of the item, padded for selection handles.
+
+                Returns:
+                    A QRectF representing the full repaint area, including resize handles.
+                """
         return self.rect().adjusted(-12, -12, 12, 12)
 
     def _get_handles(self):
+        """Generates bounding rectangles for all 8 interactive resize handles.
+
+                Returns:
+                    A dictionary mapping directional keys ('TL', 'T', 'TR', 'R', 'BR', 'B', 'BL', 'L')
+                    to their respective QRectF screen coordinates.
+                """
         r = self.rect()
         w, h, hs = r.width(), r.height(), self.resize_handle_size
         return {
@@ -405,6 +511,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
         }
 
     def _draw_handles(self, painter):
+        """Renders the green 8-way resize handles and the red top-right delete button.
+
+                Args:
+                    painter: The active QPainter instance used for drawing.
+                """
         painter.setBrush(QBrush(QColor("#00FF00")))
         painter.setPen(QPen(QColor("#000000"), 1))
 
@@ -420,6 +531,15 @@ class XUIGraphicsItem(QGraphicsRectItem):
         painter.drawText(del_rect, Qt.AlignCenter, "X")
 
     def mousePressEvent(self, event):
+        """Handles mouse click interactions for tab creation, tab switching, and resize grabs.
+
+                Intercepts left-clicks to handle specialized container controls (like the tab '+')
+                before falling back to selection delete checks, resize handle grabs, or standard
+                Qt drag behavior.
+
+                Args:
+                    event: The QGraphicsSceneMouseEvent containing click coordinates and modifiers.
+                """
         if event.button() == Qt.LeftButton:
             pos = event.pos()
 
@@ -547,6 +667,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
         super().hoverMoveEvent(event)
 
     def mouseMoveEvent(self, event):
+        """Processes mouse drag events to perform grid-snapped item resizing.
+
+                Args:
+                    event: The QGraphicsSceneMouseEvent containing drag trajectory data.
+                """
         if self.resizing and self.resize_dir:
             scene_pos = self.mapToScene(event.pos())
             parent_pos = self.parentItem().mapFromScene(scene_pos) if self.parentItem() else scene_pos
@@ -595,6 +720,11 @@ class XUIGraphicsItem(QGraphicsRectItem):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        """Finalizes resizing operations and emits item modification signals.
+
+                Args:
+                    event: The QGraphicsSceneMouseEvent representing the button release.
+                """
         if self.resizing:
             self.resizing = False
             self.resize_dir = None
@@ -610,6 +740,14 @@ class XUIGraphicsItem(QGraphicsRectItem):
         super().mouseReleaseEvent(event)
 
     def validate(self):
+        """Evaluates the item against Second Life XUI layout and syntax rules.
+
+                Checks for common UI flaws such as missing names, invalid layout panel parenting,
+                or opposing positional anchors without corresponding 'follows' flags.
+
+                Returns:
+                    A tuple containing two lists: (error_strings, warning_strings).
+                """
         errors, warnings = [], []
         if self.tag_name not in ["panel", "layout_panel", "text", "view_border", "icon", "window_shade", "accordion",
                                  "scroll_list"]:
@@ -633,6 +771,16 @@ class XUIGraphicsItem(QGraphicsRectItem):
         return errors, warnings
 
     def paint(self, painter, option, widget=None):
+        """Renders the complete graphical representation of the XUI widget on the canvas.
+
+                Handles 9-slice texture scaling, solid color fallbacks, control icons, text alignment,
+                and specialized layouts for floaters, progress bars, text labels, and checkboxes.
+
+                Args:
+                    painter: The active QPainter instance used for drawing.
+                    option: The QStyleOptionGraphicsItem containing exposure and selection states.
+                    widget: Optional target widget being painted on (defaults to None).
+                """
         try:
             painter.setClipRect(option.exposedRect)
             rect = self.rect()
@@ -890,7 +1038,12 @@ class XUIGraphicsItem(QGraphicsRectItem):
             print(f"[Verbose Error] _draw_tab_container_internal failed: {e}")
 
     def _draw_selection_box(self, painter, rect):
-        """Helper to draw the green dashed selection bounding box and 8-way resize handles."""
+        """Renders the green dashed selection bounding box and interactive handles.
+
+                Args:
+                    painter: The active QPainter instance used for drawing.
+                    rect: The inner bounding rectangle of the item body.
+                """
         if self.isSelected():
             painter.save()
             painter.setPen(QPen(QColor("#00FF00"), 1, Qt.DashLine))

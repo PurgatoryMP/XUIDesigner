@@ -1,17 +1,55 @@
+"""
+This module provides the PropertyInspector panel and support dialogs used to view
+and modify XML attribute dictionaries attached to XUIGraphicsItems. It generates
+schema-driven UI controls (text inputs, dropdowns, checkboxes, and asset browsers)
+and synchronizes attribute modifications directly back to the 2D canvas in real time.
+"""
+
 import os
+from typing import Any, Dict, Optional, Set, Tuple
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFormLayout, QLabel,
-    QGroupBox, QLineEdit, QComboBox, QCheckBox, QPushButton, QFileDialog,
-    QMessageBox, QDialog
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
-from registry import LLVIEW_PARAMS, LLUICTRL_PARAMS, XUI_REGISTRY
+
+from registry import LLUICTRL_PARAMS, LLVIEW_PARAMS, XUI_REGISTRY
 
 
 class AddAttributeDialog(QDialog):
-    """Modal dialog for adding custom attributes to an XUI control."""
+    """Modal dialog for attaching custom attributes to an XUI control.
 
-    def __init__(self, existing_keys, parent=None):
+    Provides a structured form for users to input a new attribute name and value,
+    enforcing standard XML naming conventions and preventing duplicate keys from
+    being added to the control.
+
+    Attributes:
+        existing_keys (Set[str]): Attribute names already present on the target control.
+        name_edit (QLineEdit): Text input field for the new attribute name.
+        value_edit (QLineEdit): Text input field for the initial attribute value.
+        err_label (QLabel): Inline warning label displayed when validation fails.
+    """
+
+    def __init__(self, existing_keys: Set[str], parent: Optional[QWidget] = None) -> None:
+        """Initializes the AddAttributeDialog and constructs its UI form layout.
+
+        Args:
+            existing_keys: A set of attribute keys already existing on the widget.
+            parent: The parent QWidget instance, if any.
+        """
         super().__init__(parent)
         self.setWindowTitle("Add Custom Attribute")
         self.resize(340, 160)
@@ -20,23 +58,29 @@ class AddAttributeDialog(QDialog):
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
+        # Input field for attribute key name
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("e.g., hover_color, min_val, tooltip...")
         form.addRow("Attribute Name:", self.name_edit)
 
+        # Input field for initial attribute value
         self.value_edit = QLineEdit()
         self.value_edit.setPlaceholderText("e.g., true, 1 1 1 1, 100...")
         form.addRow("Attribute Value:", self.value_edit)
 
         layout.addLayout(form)
 
+        # Inline error display label
         self.err_label = QLabel("")
         self.err_label.setStyleSheet("color: #FF0000; font-size: 11px;")
         layout.addWidget(self.err_label)
 
+        # Bottom action button box
         btn_box = QHBoxLayout()
         add_btn = QPushButton("Add Attribute")
-        add_btn.setStyleSheet("background-color: #1e457c; color: white; font-weight: bold; padding: 4px 12px;")
+        add_btn.setStyleSheet(
+            "background-color: #1e457c; color: white; font-weight: bold; padding: 4px 12px;"
+        )
         add_btn.setCursor(Qt.PointingHandCursor)
         add_btn.clicked.connect(self.validate_and_accept)
 
@@ -49,34 +93,64 @@ class AddAttributeDialog(QDialog):
         btn_box.addWidget(cancel_btn)
         layout.addLayout(btn_box)
 
-    def validate_and_accept(self):
+    def validate_and_accept(self) -> None:
+        """Validates the input attribute name against XML standards and existing keys.
+
+        If validation succeeds, closes the dialog with QDialog.Accepted. Otherwise,
+        updates the error label with the specific validation failure reason.
+        """
         name = self.name_edit.text().strip()
         if not name:
             self.err_label.setText("Attribute name cannot be empty.")
             return
-        # Ensure standard XML attribute naming conventions
+
+        # Ensure standard XML attribute naming conventions (alphanumeric with standard delimiters)
         if not name.replace("_", "").replace("-", "").replace(".", "").isalnum():
             self.err_label.setText("Invalid characters in attribute name.")
             return
+
+        # Prevent overwriting existing keys via the add dialog
         if name in self.existing_keys:
             self.err_label.setText("Attribute already exists on this control.")
             return
+
         self.accept()
 
 
 class PropertyInspector(QWidget):
+    """Dynamic property inspection and editing panel for XUI controls.
+
+    Automatically generates form inputs (text fields, checkboxes, comboboxes, and file
+    browse buttons) based on the schema definition of the selected XUI item. Handles
+    real-time bidirectional synchronization between UI controls and canvas geometry.
+
+    Attributes:
+        property_changed_signal (Signal): Emitted whenever any attribute value is modified.
+        external_file_import_needed (Signal): Emitted with (xui_item, filename) when an XML import is triggered.
+        current_xui_item (Optional[Any]): Reference to the currently inspected XUIGraphicsItem.
+        updating (bool): Internal lock flag used to prevent recursive signal feedback loops.
+        editors (Dict[str, Tuple[QWidget, str]]): Mapping of attribute names to tuples containing
+            the editor widget instance and the data type string ('str', 'bool', 'combo').
+    """
+
     property_changed_signal = Signal()
     external_file_import_needed = Signal(object, str)  # Emits (xui_item, filename)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initializes the PropertyInspector and configures its scrollable workspace.
+
+        Args:
+            parent: The parent QWidget instance, if any.
+        """
         super().__init__(parent)
-        self.current_xui_item = None
-        self.updating = False
-        self.editors = {}
+        self.current_xui_item: Optional[Any] = None
+        self.updating: bool = False
+        self.editors: Dict[str, Tuple[QWidget, str]] = {}
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
+        # Main scrollable container allowing long attribute lists to fit cleanly
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QScrollArea.NoFrame)
@@ -88,12 +162,22 @@ class PropertyInspector(QWidget):
         self.scroll_area.setWidget(self.scroll_content)
         self.layout.addWidget(self.scroll_area)
 
-    def set_item(self, xui_item):
+    def set_item(self, xui_item: Any) -> None:
+        """Binds a new XUIGraphicsItem to the inspector and rebuilds the input form.
+
+        Args:
+            xui_item: The canvas graphics item whose attributes should be inspected.
+        """
         self.current_xui_item = xui_item
         self._rebuild_form()
 
-    def refresh_values(self):
-        """Silently updates field data in real-time without rebuilding the UI (prevents focus loss)."""
+    def refresh_values(self) -> None:
+        """Silently updates form field data in real-time without rebuilding the UI.
+
+        By updating existing widget values rather than destroying and recreating the form,
+        this method prevents focus loss and cursor jumping when attributes are changed
+        via external canvas drags or background operations.
+        """
         try:
             if self.updating or not self.current_xui_item:
                 return
@@ -117,8 +201,18 @@ class PropertyInspector(QWidget):
             print(f"[Verbose Error] PropertyInspector.refresh_values exception: {e}")
             self.updating = False
 
-    def _is_image_attribute(self, attr_name):
-        """Identifies SL control texture and image attributes."""
+    def _is_image_attribute(self, attr_name: str) -> bool:
+        """Determines whether an attribute represents an SL control texture or image file.
+
+        Used during UI generation to attach file browser helper buttons ('...') next to
+        texture-related text fields.
+
+        Args:
+            attr_name: The attribute name string to evaluate.
+
+        Returns:
+            True if the attribute is recognized as an image or texture reference.
+        """
         attr_lower = attr_name.lower()
         image_keys = {
             "image", "image_unselected", "image_selected", "image_hover_unselected",
@@ -129,11 +223,22 @@ class PropertyInspector(QWidget):
             "up_button_image", "down_button_image", "left_button_image", "right_button_image",
             "floater_header", "floater_bg", "panel_bg"
         }
-        return attr_lower in image_keys or attr_lower.startswith("image") or attr_lower.endswith(
-            "_image") or "icon" in attr_lower
+        return (
+                attr_lower in image_keys
+                or attr_lower.startswith("image")
+                or attr_lower.endswith("_image")
+                or "icon" in attr_lower
+        )
 
-    def _rebuild_form(self):
+    def _rebuild_form(self) -> None:
+        """Dynamically builds group boxes and editor widgets based on the item's schema.
+
+        Resolves parameter definitions from XUI_REGISTRY, generates appropriate editor
+        types (checkboxes for bools, comboboxes for options, line edits for strings),
+        and groups them into categorized collapsible layout panels.
+        """
         try:
+            # Clear existing form widgets and layout hierarchies
             while self.main_form_layout.count():
                 child = self.main_form_layout.takeAt(0)
                 if child.widget():
@@ -141,7 +246,8 @@ class PropertyInspector(QWidget):
                 elif child.layout():
                     while child.layout().count():
                         sub = child.layout().takeAt(0)
-                        if sub.widget(): sub.widget().deleteLater()
+                        if sub.widget():
+                            sub.widget().deleteLater()
             self.editors.clear()
 
             if not self.current_xui_item:
@@ -155,13 +261,16 @@ class PropertyInspector(QWidget):
             add_attr_btn = QPushButton("+ Add Attribute")
             add_attr_btn.setCursor(Qt.PointingHandCursor)
             add_attr_btn.setStyleSheet(
-                "background-color: #1e457c; color: white; font-weight: bold; padding: 5px; border-radius: 3px;")
+                "background-color: #1e457c; color: white; font-weight: bold; "
+                "padding: 5px; border-radius: 3px;"
+            )
             add_attr_btn.setToolTip("Add a custom XML attribute to this control")
             add_attr_btn.clicked.connect(self._on_add_attribute_clicked)
             top_bar.addStretch()
             top_bar.addWidget(add_attr_btn)
             self.main_form_layout.addLayout(top_bar)
 
+            # Resolve target parameter definitions from global XUI registry
             tag_name = self.current_xui_item.tag_name
             target_params = {}
             for cat_name, widgets in XUI_REGISTRY.items():
@@ -172,13 +281,20 @@ class PropertyInspector(QWidget):
             if not target_params:
                 target_params = dict(LLUICTRL_PARAMS if tag_name != "view" else LLVIEW_PARAMS)
 
+            # Ensure external XML filename import capability is universally available
             if "filename" not in target_params:
-                target_params["filename"] = {"type": "str", "default": "", "group": "External Import"}
+                target_params["filename"] = {
+                    "type": "str", "default": "", "group": "External Import"
+                }
 
+            # Discover non-schema custom attributes already attached to the item
             for attr_key in self.current_xui_item.attributes.keys():
                 if attr_key not in target_params and attr_key != "designer_export_geometry":
-                    target_params[attr_key] = {"type": "str", "default": "", "group": "Custom / Extra Attributes"}
+                    target_params[attr_key] = {
+                        "type": "str", "default": "", "group": "Custom / Extra Attributes"
+                    }
 
+            # Group attributes by their schema category assigned names
             grouped = {}
             for attr_name, meta in target_params.items():
                 group_name = meta.get("group", "General Properties")
@@ -186,6 +302,7 @@ class PropertyInspector(QWidget):
                     grouped[group_name] = []
                 grouped[group_name].append((attr_name, meta))
 
+            # Build visual UI panels for each categorized parameter group
             for group_name, params in sorted(grouped.items()):
                 group_box = QGroupBox(group_name)
                 form_layout = QFormLayout(group_box)
@@ -193,13 +310,16 @@ class PropertyInspector(QWidget):
 
                 for attr_name, meta in sorted(params, key=lambda x: x[0]):
                     attr_type = meta.get("type", "str")
-                    current_val = self.current_xui_item.attributes.get(attr_name, meta.get("default", ""))
+                    current_val = self.current_xui_item.attributes.get(
+                        attr_name, meta.get("default", "")
+                    )
 
                     if attr_type == "bool":
                         editor = QCheckBox()
                         editor.setChecked(str(current_val).lower() in ["true", "1", "yes"])
                         editor.toggled.connect(
-                            lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t))
+                            lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t)
+                        )
                         self.editors[attr_name] = (editor, attr_type)
                         form_layout.addRow(QLabel(f"{attr_name}:"), editor)
                     elif attr_type == "combo":
@@ -209,7 +329,8 @@ class PropertyInspector(QWidget):
                         editor.addItems([str(o) for o in options])
                         editor.setCurrentText(str(current_val))
                         editor.currentTextChanged.connect(
-                            lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t))
+                            lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t)
+                        )
                         self.editors[attr_name] = (editor, attr_type)
                         form_layout.addRow(QLabel(f"{attr_name}:"), editor)
                     else:
@@ -218,10 +339,12 @@ class PropertyInspector(QWidget):
                         # --- XML File Selector Button & Debounced Import Trigger ---
                         if attr_name == "filename":
                             editor.textChanged.connect(
-                                lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t))
+                                lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t)
+                            )
                             # Trigger XML import only when typing is finished or browse is clicked
                             editor.editingFinished.connect(
-                                lambda e=editor: self._trigger_filename_import(e.text().strip()))
+                                lambda e=editor: self._trigger_filename_import(e.text().strip())
+                            )
 
                             btn = QPushButton("...")
                             btn.setFixedWidth(28)
@@ -239,7 +362,8 @@ class PropertyInspector(QWidget):
                         # --- Image / Texture File Selector Button ---
                         elif self._is_image_attribute(attr_name):
                             editor.textChanged.connect(
-                                lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t))
+                                lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t)
+                            )
                             btn = QPushButton("...")
                             btn.setFixedWidth(28)
                             btn.setToolTip("Select Control Texture / Image File")
@@ -255,7 +379,8 @@ class PropertyInspector(QWidget):
                             form_layout.addRow(QLabel(f"{attr_name}:"), container)
                         else:
                             editor.textChanged.connect(
-                                lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t))
+                                lambda val, k=attr_name, t=attr_type: self._on_property_edited(k, val, t)
+                            )
                             self.editors[attr_name] = (editor, attr_type)
                             form_layout.addRow(QLabel(f"{attr_name}:"), editor)
 
@@ -263,8 +388,12 @@ class PropertyInspector(QWidget):
         except Exception as e:
             print(f"[Verbose Error] PropertyInspector._rebuild_form exception: {e}")
 
-    def _on_add_attribute_clicked(self):
-        """Opens modal dialog to attach a new attribute to the selected control."""
+    def _on_add_attribute_clicked(self) -> None:
+        """Opens a modal dialog allowing the user to attach a new XML attribute.
+
+        If accepted, assigns the new attribute key-value pair to the item, triggers
+        any necessary file imports, and rebuilds the inspector form.
+        """
         if not self.current_xui_item:
             return
         try:
@@ -284,20 +413,35 @@ class PropertyInspector(QWidget):
                 # Rebuild inspector form so the new attribute appears instantly
                 self._rebuild_form()
         except Exception as e:
-            QMessageBox.critical(self, "Add Attribute Error", f"Failed to add custom attribute:\n{str(e)}")
+            QMessageBox.critical(
+                self,
+                "Add Attribute Error",
+                f"Failed to add custom attribute:\n{str(e)}"
+            )
             print(f"[Verbose Error] _on_add_attribute_clicked exception: {e}")
 
-    def _trigger_filename_import(self, filename_val):
-        """Safely triggers external XML import signal."""
+    def _trigger_filename_import(self, filename_val: str) -> None:
+        """Safely triggers external XML import signal if a valid filename is present.
+
+        Args:
+            filename_val: The relative or absolute string filename to import.
+        """
         if self.updating or not self.current_xui_item:
             return
         try:
             if filename_val and str(filename_val).strip():
-                self.external_file_import_needed.emit(self.current_xui_item, str(filename_val).strip())
+                self.external_file_import_needed.emit(
+                    self.current_xui_item, str(filename_val).strip()
+                )
         except Exception as e:
             print(f"[Verbose Error] _trigger_filename_import exception: {e}")
 
-    def _browse_xml_file(self, editor):
+    def _browse_xml_file(self, editor: QLineEdit) -> None:
+        """Launches a file selection dialog to browse for external XUI XML layouts.
+
+        Args:
+            editor: The target QLineEdit instance that should receive the selected filename.
+        """
         try:
             start_dir = ""
             try:
@@ -307,7 +451,10 @@ class PropertyInspector(QWidget):
                 print(f"[Verbose Error] Could not resolve XUI path: {path_err}")
 
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select XUI XML File to Import", start_dir, "XML Files (*.xml);;All Files (*)"
+                self,
+                "Select XUI XML File to Import",
+                start_dir,
+                "XML Files (*.xml);;All Files (*)"
             )
             if file_path:
                 rel_name = os.path.basename(file_path)
@@ -315,11 +462,22 @@ class PropertyInspector(QWidget):
                 # Immediately trigger import upon selecting via browse button
                 self._trigger_filename_import(rel_name)
         except Exception as e:
-            QMessageBox.critical(self, "Error Selecting XML File",
-                                 f"An error occurred while browsing for XML:\n{str(e)}")
+            QMessageBox.critical(
+                self,
+                "Error Selecting XML File",
+                f"An error occurred while browsing for XML:\n{str(e)}"
+            )
             print(f"[Verbose Error] _browse_xml_file exception: {e}")
 
-    def _browse_image_file(self, editor):
+    def _browse_image_file(self, editor: QLineEdit) -> None:
+        """Launches a file selection dialog to browse for control texture images.
+
+        Upon selection, strips the file extension to match Second Life texture naming
+        conventions and refreshes the global texture manager cache.
+
+        Args:
+            editor: The target QLineEdit instance that should receive the selected texture stem.
+        """
         try:
             start_dir = ""
             try:
@@ -329,7 +487,9 @@ class PropertyInspector(QWidget):
                 print(f"[Verbose Error] Could not resolve textures path: {path_err}")
 
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select Control Texture / Image", start_dir,
+                self,
+                "Select Control Texture / Image",
+                start_dir,
                 "Image Files (*.png *.tga *.jpg *.jpeg *.bmp *.j2k);;All Files (*)"
             )
             if file_path:
@@ -343,20 +503,39 @@ class PropertyInspector(QWidget):
                 except Exception as tex_err:
                     print(f"[Verbose Error] Live texture cache sync failed: {tex_err}")
         except Exception as e:
-            QMessageBox.critical(self, "Error Selecting Image File",
-                                 f"An error occurred while browsing for image:\n{str(e)}")
+            QMessageBox.critical(
+                self,
+                "Error Selecting Image File",
+                f"An error occurred while browsing for image:\n{str(e)}"
+            )
             print(f"[Verbose Error] _browse_image_file exception: {e}")
 
-    def _on_property_edited(self, attr_name, value, attr_type):
+    def _on_property_edited(self, attr_name: str, value: Any, attr_type: str) -> None:
+        """Processes real-time edits made to any property field in the inspector.
+
+        Updates the underlying XUIGraphicsItem attribute dictionary, recalculates
+        absolute or relative spatial geometry on the canvas if layout attributes were
+        modified, and emits change notifications.
+
+        Args:
+            attr_name: The name of the attribute being modified.
+            value: The raw value emitted from the editor widget.
+            attr_type: The schema data type ('str', 'bool', 'combo').
+        """
         try:
             if self.updating or not self.current_xui_item:
                 return
 
             self.updating = True
-            val_str = "true" if (attr_type == "bool" and value) else ("false" if attr_type == "bool" else str(value))
+            # Convert boolean UI states back to Second Life XML string representations
+            val_str = (
+                "true" if (attr_type == "bool" and value)
+                else ("false" if attr_type == "bool" else str(value))
+            )
             self.current_xui_item.attributes[attr_name] = val_str
 
             try:
+                # Recalculate physical dimensions and coordinates on the canvas item
                 if attr_name in ["width", "height"]:
                     w = float(self.current_xui_item.attributes.get("width", 100))
                     h = float(self.current_xui_item.attributes.get("height", 20))
@@ -367,20 +546,28 @@ class PropertyInspector(QWidget):
                     self.current_xui_item.setPos(x, y)
                     self.current_xui_item.sync_attributes_to_geometry()
                 elif attr_name in ["left_delta", "left_pad", "top_delta", "top_pad"]:
+                    # Handle relative spatial alignments against previous sibling widgets
                     parent = self.current_xui_item.parentItem()
-                    if parent and hasattr(parent,
-                                          'child_xui_items') and self.current_xui_item in parent.child_xui_items:
+                    if (
+                            parent
+                            and hasattr(parent, 'child_xui_items')
+                            and self.current_xui_item in parent.child_xui_items
+                    ):
                         idx = parent.child_xui_items.index(self.current_xui_item)
                         prev_sib = parent.child_xui_items[idx - 1] if idx > 0 else None
                         if prev_sib:
                             if attr_name == "left_delta":
                                 self.current_xui_item.setX(prev_sib.x() + float(val_str))
                             elif attr_name == "left_pad":
-                                self.current_xui_item.setX(prev_sib.x() + prev_sib.rect().width() + float(val_str))
+                                self.current_xui_item.setX(
+                                    prev_sib.x() + prev_sib.rect().width() + float(val_str)
+                                )
                             elif attr_name == "top_delta":
                                 self.current_xui_item.setY(prev_sib.y() + float(val_str))
                             elif attr_name == "top_pad":
-                                self.current_xui_item.setY(prev_sib.y() + prev_sib.rect().height() + float(val_str))
+                                self.current_xui_item.setY(
+                                    prev_sib.y() + prev_sib.rect().height() + float(val_str)
+                                )
                             self.current_xui_item.sync_attributes_to_geometry()
             except ValueError:
                 pass
@@ -388,8 +575,14 @@ class PropertyInspector(QWidget):
             self.updating = False
             self.property_changed_signal.emit()
 
-            if self.current_xui_item.scene() and hasattr(self.current_xui_item.scene(), 'canvas_container'):
-                self.current_xui_item.scene().canvas_container.item_modified_signal.emit(self.current_xui_item)
+            # Push modification events to the host canvas scene
+            if (
+                    self.current_xui_item.scene()
+                    and hasattr(self.current_xui_item.scene(), 'canvas_container')
+            ):
+                self.current_xui_item.scene().canvas_container.item_modified_signal.emit(
+                    self.current_xui_item
+                )
         except Exception as e:
             print(f"[Verbose Error] PropertyInspector._on_property_edited exception: {e}")
             self.updating = False

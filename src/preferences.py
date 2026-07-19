@@ -1,36 +1,81 @@
+"""User preferences dialog for the XUI Designer.
+
+This module provides the PreferencesDialog class, a modal UI window that allows
+users to configure Second Life Viewer installation paths, select active skins,
+and customize syntax highlighting and interface color palettes. Changes are saved
+to disk and applied live to the running application.
+"""
+
 import os
+from typing import Any, Optional
+
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QPushButton,
-    QHBoxLayout, QMessageBox, QColorDialog, QLabel, QWidget,
-    QLineEdit, QFileDialog, QGroupBox, QScrollArea, QComboBox
-)
 from PySide6.QtGui import QColor
-from config import CONFIG, save_config, get_textures_path
+from PySide6.QtWidgets import (
+    QColorDialog,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from config import CONFIG, get_textures_path, save_config
 from registry import reload_registry
 from textures import TextureManager
 
 
 class PreferencesDialog(QDialog):
-    def __init__(self, parent=None):
+    """Modal dialog for editing application preferences and color themes.
+
+    Provides a scrollable interface divided into Viewer/Skin paths, Syntax colors,
+    and UI theme colors. Tracks live color modifications and synchronizes saved
+    changes across global configuration dictionaries, asset managers, and the
+    primary editor workspace.
+
+    Attributes:
+        picked_colors (dict[str, str]): Maps combined category/key strings to hex color codes.
+        viewer_path_edit (QLineEdit): Text field containing the active SL Viewer installation path.
+        skin_combo (QComboBox): Dropdown list of discovered or custom viewer skin names.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initializes the PreferencesDialog and constructs its scrollable form sections.
+
+        Args:
+            parent: The parent QWidget window, if any.
+        """
         super().__init__(parent)
         self.setWindowTitle("XUI Designer Preferences")
         self.resize(520, 580)
 
         main_layout = QVBoxLayout(self)
+
+        # Configure scrollable workspace to ensure usability on smaller screens
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QScrollArea.NoFrame)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
 
-        self.picked_colors = {}
+        # Dictionary tracking modified hex values before commit
+        self.picked_colors: dict[str, str] = {}
 
         # --- Section 1: Viewer & Skin Settings ---
         paths_group = QGroupBox("Second Life Viewer & Skin Settings")
         paths_layout = QFormLayout(paths_group)
 
-        viewer_path = CONFIG.get("paths", {}).get("sl_viewer_path", "C:/Program Files/SecondLifeViewer")
+        viewer_path = CONFIG.get("paths", {}).get(
+            "sl_viewer_path", "C:/Program Files/SecondLifeViewer"
+        )
         self.viewer_path_edit = QLineEdit(viewer_path)
 
         browse_btn = QPushButton("Browse...")
@@ -42,9 +87,9 @@ class PreferencesDialog(QDialog):
         path_box.addWidget(browse_btn)
         paths_layout.addRow("Viewer Installation Path:", path_box)
 
-        # Single, unified Skin Selection Dropdown
+        # Unified skin selection dropdown; left editable to allow custom folder naming
         self.skin_combo = QComboBox()
-        self.skin_combo.setEditable(True)  # Allow manual entry for new custom skins
+        self.skin_combo.setEditable(True)
         self.populate_skins(viewer_path)
 
         current_skin = CONFIG.get("paths", {}).get("skin_name", "default")
@@ -54,6 +99,7 @@ class PreferencesDialog(QDialog):
         else:
             self.skin_combo.setCurrentText(current_skin)
 
+        # Automatically rescan skins if the user edits the viewer installation path
         self.viewer_path_edit.textChanged.connect(self.populate_skins)
         paths_layout.addRow("Active Skin Folder:", self.skin_combo)
         scroll_layout.addWidget(paths_group)
@@ -88,8 +134,17 @@ class PreferencesDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
         main_layout.addLayout(btn_layout)
 
-    def populate_skins(self, viewer_path=None):
-        """Scans viewer installation or direct skins directories for available skins."""
+    def populate_skins(self, viewer_path: Optional[Any] = None) -> None:
+        """Scans viewer installation or direct skin directories for available themes.
+
+        Checks both standard Second Life directory structures (/skins/<skin_name>)
+        and alternate layouts where the viewer path itself acts as the skin root.
+        Ensures 'default' is always prioritized at the top of the dropdown list.
+
+        Args:
+            viewer_path: The filesystem path string to scan. If omitted or not a string,
+                falls back to reading the contents of self.viewer_path_edit.
+        """
         try:
             if not isinstance(viewer_path, str) or not viewer_path:
                 viewer_path = self.viewer_path_edit.text().strip()
@@ -99,7 +154,7 @@ class PreferencesDialog(QDialog):
             self.skin_combo.clear()
             skins_found = []
 
-            # Check inside /skins/ subdirectory
+            # Check inside standard /skins/ subdirectory
             skins_subdir = os.path.join(viewer_path, "skins")
             if os.path.exists(skins_subdir) and os.path.isdir(skins_subdir):
                 target_dir = skins_subdir
@@ -112,12 +167,14 @@ class PreferencesDialog(QDialog):
             else:
                 target_dir = None
 
+            # Discover all valid subdirectories representing distinct skins
             if target_dir and os.path.exists(target_dir):
                 for item in sorted(os.listdir(target_dir)):
                     full_p = os.path.join(target_dir, item)
                     if os.path.isdir(full_p) and not item.startswith('.'):
                         skins_found.append(item)
 
+            # Ensure 'default' always exists and sits at index 0
             if "default" not in skins_found:
                 skins_found.insert(0, "default")
             elif skins_found[0] != "default":
@@ -126,6 +183,7 @@ class PreferencesDialog(QDialog):
 
             self.skin_combo.addItems(skins_found)
 
+            # Restore previous selection state if valid
             idx = self.skin_combo.findText(current_selection)
             if idx >= 0:
                 self.skin_combo.setCurrentIndex(idx)
@@ -141,7 +199,17 @@ class PreferencesDialog(QDialog):
             if self.skin_combo.count() == 0:
                 self.skin_combo.addItem("default")
 
-    def _make_color_picker(self, category, key, initial_hex):
+    def _make_color_picker(self, category: str, key: str, initial_hex: str) -> QWidget:
+        """Constructs an interactive color picker button and hex display label.
+
+        Args:
+            category: The theme category name ('syntax' or 'ui').
+            key: The specific configuration color key (e.g., 'header', 'window_bg').
+            initial_hex: The starting hexadecimal color string (e.g., '#808080').
+
+        Returns:
+            A QWidget container holding the styled color button and text label.
+        """
         full_key = f"{category}_{key}"
         self.picked_colors[full_key] = initial_hex
 
@@ -149,22 +217,30 @@ class PreferencesDialog(QDialog):
         h_layout = QHBoxLayout(container)
         h_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Button visually styled with the current hex color as its background
         btn = QPushButton()
-        btn.setStyleSheet(f"background-color: {initial_hex}; border: 1px solid #777; border-radius: 3px;")
+        btn.setStyleSheet(
+            f"background-color: {initial_hex}; border: 1px solid #777; border-radius: 3px;"
+        )
         btn.setFixedSize(40, 22)
         btn.setCursor(Qt.PointingHandCursor)
 
         lbl = QLabel(initial_hex)
         lbl.setFixedWidth(65)
 
-        def pick_color():
+        def pick_color() -> None:
+            """Opens a QColorDialog and updates visual styles upon color selection."""
             try:
                 current_color = QColor(self.picked_colors[full_key])
-                new_color = QColorDialog.getColor(current_color, self, f"Select Color for {key.capitalize()}")
+                new_color = QColorDialog.getColor(
+                    current_color, self, f"Select Color for {key.capitalize()}"
+                )
                 if new_color.isValid():
                     hex_val = new_color.name()
                     self.picked_colors[full_key] = hex_val
-                    btn.setStyleSheet(f"background-color: {hex_val}; border: 1px solid #777; border-radius: 3px;")
+                    btn.setStyleSheet(
+                        f"background-color: {hex_val}; border: 1px solid #777; border-radius: 3px;"
+                    )
                     lbl.setText(hex_val)
             except Exception as e:
                 print(f"[Verbose Error] Color picker exception: {e}")
@@ -175,28 +251,40 @@ class PreferencesDialog(QDialog):
         h_layout.addStretch()
         return container
 
-    def _browse_viewer_path(self):
+    def _browse_viewer_path(self) -> None:
+        """Launches a directory selection dialog to locate the SL Viewer folder."""
         try:
             dir_path = QFileDialog.getExistingDirectory(
-                self, "Select Second Life Viewer Installation Directory", self.viewer_path_edit.text()
+                self,
+                "Select Second Life Viewer Installation Directory",
+                self.viewer_path_edit.text(),
             )
             if dir_path:
                 self.viewer_path_edit.setText(dir_path)
         except Exception as e:
             print(f"[Verbose Error] _browse_viewer_path failed: {e}")
 
-    def save_and_close(self):
+    def save_and_close(self) -> None:
+        """Commits updated preferences to disk and applies changes live to the editor.
+
+        Updates the global CONFIG dictionary, serializes to config.json, triggers
+        schema and texture cache reloads, and pushes style updates to the MainWindow
+        and active canvas scene without requiring an application restart.
+        """
         try:
             if "paths" not in CONFIG:
                 CONFIG["paths"] = {}
 
+            # Save core directory and skin preferences
             CONFIG["paths"]["sl_viewer_path"] = self.viewer_path_edit.text().strip()
             CONFIG["paths"]["skin_name"] = self.skin_combo.currentText().strip() or "default"
 
+            # Commit modified syntax highlighting colors
             for key in CONFIG.get("syntax_colors", {}):
                 if f"syntax_{key}" in self.picked_colors:
                     CONFIG["syntax_colors"][key] = self.picked_colors[f"syntax_{key}"]
 
+            # Commit modified interface colors
             for key in CONFIG.get("ui_colors", {}):
                 if f"ui_{key}" in self.picked_colors:
                     CONFIG["ui_colors"][key] = self.picked_colors[f"ui_{key}"]
@@ -211,7 +299,7 @@ class PreferencesDialog(QDialog):
             except Exception as tex_err:
                 print(f"[Verbose Error] Failed refreshing TextureManager paths: {tex_err}")
 
-            # Push live UI updates to MainWindow
+            # Push live UI updates to MainWindow and force canvas redraws
             parent_win = self.parent()
             if parent_win and hasattr(parent_win, "apply_live_preferences"):
                 parent_win.apply_live_preferences()
@@ -220,5 +308,7 @@ class PreferencesDialog(QDialog):
 
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Preferences Error", f"Failed to save preferences:\n{str(e)}")
+            QMessageBox.critical(
+                self, "Preferences Error", f"Failed to save preferences:\n{str(e)}"
+            )
             print(f"[Verbose Error] save_and_close exception: {e}")
