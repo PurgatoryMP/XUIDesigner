@@ -1,5 +1,4 @@
-"""User preferences dialog for the XUI Designer.
-
+"""
 This module provides the PreferencesDialog class, a modal UI window that allows
 users to configure Second Life Viewer installation paths, select active skins,
 and customize syntax highlighting and interface color palettes. Changes are saved

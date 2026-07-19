@@ -1,5 +1,4 @@
-"""DOM Hierarchy Tree View widget for the XUI Designer.
-
+"""
 This module provides the SceneTreeWidget, which visually displays and allows
 manipulation of the XUI DOM hierarchy. It handles two-way selection and structural
 synchronization between the tree view and the graphical canvas.
